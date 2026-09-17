@@ -10,7 +10,7 @@ assert.match(manifest.version, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/, 'manife
 assert.ok(manifest.key, 'Chromium manifest must contain a fixed public key');
 assert.equal(
   manifest.update_url,
-  'https://raw.githubusercontent.com/dulo11/fanyireal-time/extension-update-channel/updates.xml'
+  'https://raw.githubusercontent.com/dulo11/fanyi2/extension-update-channel/updates.xml'
 );
 
 const der = Buffer.from(manifest.key, 'base64');
