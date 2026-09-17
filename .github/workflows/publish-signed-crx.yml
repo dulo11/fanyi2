@@ -2,13 +2,6 @@ name: Publish Signed Chromium CRX
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'browser-v*'
-    branches:
-      - main
-    paths:
-      - 'browser-extension/manifest.json'
 
 permissions:
   contents: write
