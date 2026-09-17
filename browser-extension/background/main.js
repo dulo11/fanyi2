@@ -34,6 +34,9 @@
   safeImport("../shared/crypto-lite.js");
   safeImport("../shared/glossary-core.js");
   safeImport("service-worker.js", true);
+  // Android Chromium / Quetta 的侧载 CRX 偶尔不执行 manifest 静态 content scripts。
+  // 这里增加后台补注入器：先探测页面，只有未连接时才按单文件顺序注入。
+  safeImport("page-injector.js");
   safeImport("provider-pool.js");
   safeImport("glossary-runtime.js");
   safeImport("runtime-telemetry.js");
