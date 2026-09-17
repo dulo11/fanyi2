@@ -29,16 +29,17 @@
     console.warn("[浮译] contextMenus 兼容层未能安装", error);
   }
 
-  // shared/provider/telemetry 都属于增强模块；任何一个失败都不应拖死核心翻译。
+  // 正常 ZIP / 标准 Chromium 始终优先走 manifest 原生 content_scripts，
+  // 不在后台全局改写 scripting API，也不做页面加载/切换时的自动探测。
   safeImport("../compat/browser-api.js", true);
-  // Quetta 固定签名 CRX 上 insertCSS 可能不回调；CSS 不能阻断 JS 注入。
-  safeImport("../compat/quetta-css-shim.js");
   safeImport("../shared/crypto-lite.js");
   safeImport("../shared/glossary-core.js");
   safeImport("service-worker.js", true);
-  // Android Chromium / Quetta 的侧载 CRX 偶尔不执行 manifest 静态 content scripts。
-  // 这里增加后台补注入器：先探测页面，只有未连接时才按单文件顺序注入。
+
+  // Quetta 固定签名 CRX 的补注入器仅保留“手动修复”入口。
+  // 只有 Popup 明确发送 FT_REPAIR_CURRENT_PAGE 时才执行，不影响正常 ZIP 翻译性能。
   safeImport("page-injector.js");
+
   safeImport("provider-pool.js");
   safeImport("glossary-runtime.js");
   safeImport("runtime-telemetry.js");
