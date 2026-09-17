@@ -42,24 +42,6 @@ jobs:
           test -d browser-extension/tests
           test -f browser-extension/compat/firefox/manifest.json
 
-      - name: Install standalone browser build workflow
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .github/workflows
-          cp /tmp/fanyi-source/.github/workflows/build-browser-extension.yml .github/workflows/build-browser-extension.yml
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('.github/workflows/build-browser-extension.yml')
-          s = p.read_text(encoding='utf-8')
-          start = s.index('on:\n  push:\n    branches:')
-          end = s.index('    paths:', start)
-          s = s[:start] + "on:\n  push:\n    branches:\n      - main\n" + s[end:]
-          s = s.replace('https://raw.githubusercontent.com/dulo11/fanyireal-time/extension-update-channel/updates.xml',
-                        'https://raw.githubusercontent.com/dulo11/fanyireal-time/extension-update-channel/updates.xml')
-          p.write_text(s, encoding='utf-8')
-          PY
-
       - name: Add standalone repository README
         shell: bash
         run: |
@@ -83,7 +65,7 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add README.md browser-extension .github/workflows/build-browser-extension.yml
+          git add README.md browser-extension
           if git diff --cached --quiet; then
             echo 'Nothing to migrate.'
           else
