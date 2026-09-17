@@ -18,8 +18,10 @@ test('popup repair is delegated to background injector', () => {
   assert.doesNotMatch(popup, /await chrome\.scripting\.executeScript/);
 });
 
-test('background injector uses native no-callback scripting path', () => {
+test('background injector uses native no-callback scripting path only on manual repair', () => {
   assert.match(injector, /fn\.call\(chrome\.scripting, payload\)/);
-  assert.match(injector, /native-no-callback-sequential/);
+  assert.match(injector, /manual-native-sequential/);
   assert.match(injector, /CSS.*不.*阻断|CSS.*继续注入 JS/);
+  assert.doesNotMatch(injector, /tabs\?\.onUpdated/);
+  assert.doesNotMatch(injector, /tabs\?\.onActivated/);
 });
