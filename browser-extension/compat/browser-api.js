@@ -7,8 +7,6 @@
     if (typeof browser !== "undefined" && browser?.runtime?.getURL) nativeBrowser = browser;
   } catch {}
 
-  // Firefox 的标准 WebExtensions API 使用 browser.* + Promise。
-  // 主代码历史上使用 chrome.*，因此在 Firefox 中优先把 chrome 指向 browser。
   if (nativeBrowser) {
     try {
       const scheme = String(nativeBrowser.runtime.getURL(""));
@@ -63,9 +61,6 @@
     catch { return ""; }
   }
 
-  // Quetta / 部分 Android Chromium 暴露了 Chrome API，但某些消息 API 仍然只可靠支持 callback。
-  // 主代码大量使用 await chrome.runtime.sendMessage / tabs.sendMessage，若浏览器不给 Promise，
-  // 就会出现 Popup 永远“正在读取”、网页翻译请求无返回、悬浮窗按钮无反应。
   if (family === "chromium" && globalThis.chrome?.runtime) {
     const runtime = chrome.runtime;
     const nativeRuntimeSend = typeof runtime.sendMessage === "function" ? runtime.sendMessage.bind(runtime) : null;
@@ -74,13 +69,15 @@
     if (nativeRuntimeSend) {
       const runtimeSendCompat = (...args) => {
         if (typeof args.at(-1) === "function") return nativeRuntimeSend(...args);
+        const type = args[0]?.type || "";
+        const timeoutMs = /^FT_TRANSLATE/.test(type) ? 120000 : type === "FT_REPAIR_CURRENT_PAGE" ? 20000 : 6000;
         return timeoutPromise((resolve, reject) => {
           nativeRuntimeSend(...args, response => {
             const message = lastErrorMessage();
             if (message) reject(new Error(message));
             else resolve(response);
           });
-        }, /^FT_TRANSLATE/.test(args[0]?.type || "") ? 120000 : 6000, "扩展消息通信");
+        }, timeoutMs, "扩展消息通信");
       };
 
       try { runtime.sendMessage = runtimeSendCompat; }
@@ -88,7 +85,6 @@
         try { Object.defineProperty(runtime, "sendMessage", { configurable: true, value: runtimeSendCompat }); } catch {}
       }
 
-      // 手机 Chromium 对 openOptionsPage 支持不一致。优先让后台直接创建 options 标签页。
       const openOptionsCompat = callback => {
         const task = timeoutPromise((resolve, reject) => {
           nativeRuntimeSend({ type: "FT_OPEN_OPTIONS" }, response => {
@@ -126,13 +122,15 @@
         }, timeoutMs, name);
       };
     }
+
     for (const area of [chrome.storage?.sync, chrome.storage?.local]) {
       for (const name of ["get", "set", "remove", "clear"]) wrapAsync(area, name);
     }
-    // Quetta 的侧载 CRX 可能把主机访问权限保持为 withheld；permissions API
-    // 同样优先走 callback，确保运行时授权按钮在 Android Chromium 上可靠返回。
     for (const name of ["contains", "request", "remove", "getAll"]) wrapAsync(chrome.permissions, name, 10000);
-    for (const name of ["executeScript", "insertCSS"]) wrapAsync(chrome.scripting, name, 10000);
+
+    // 不再包装 scripting.executeScript / insertCSS。
+    // Quetta 的侧载 CRX 会出现“传 callback 后永不回调”，此前正是这层兼容包装制造了
+    // insertCSS / executeScript 超时。脚本注入现在直接使用浏览器原生实现，由补注入器自行兜底。
     wrapAsync(chrome.tabs, "create");
 
     if (globalThis.chrome?.tabs) {
