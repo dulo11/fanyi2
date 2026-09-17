@@ -6,6 +6,10 @@
 
 当前迁移版本：v1.3.5。
 
-旧仓库 `dulo11/fanyireal-time` 继续保留作历史备份；后续浏览器版开发以本仓库为主。
+旧仓库 `dulo11/fanyireal-time` 仅保留作历史备份；后续浏览器版开发、ZIP 构建、Release 与自动更新通道均以 `dulo11/fanyi2` 为主。
 
-> 注意：本仓库目前为 Private。GitHub 私有仓库不能直接作为浏览器匿名 CRX 自动更新源，因此现阶段 ZIP/开发者模式安装最稳。固定扩展 ID 与签名配置仍保留在源码中；如需恢复公开 CRX 自动更新，可把更新通道放到公开仓库或 Cloudflare。
+本仓库现已公开（Public）。Chromium 固定扩展 ID 保持不变：`hlfnagdelcpfdbpdeackdjelemaaoban`。
+
+自动更新清单：`extension-update-channel` 分支根目录的 `updates.xml`。
+
+> 私钥不得提交到仓库。固定签名私钥只应保存为 GitHub Actions Secret：`FT_CRX_PRIVATE_KEY_B64`。
