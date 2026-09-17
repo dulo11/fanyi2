@@ -73,6 +73,11 @@
   const fab = $("fab");
   const panel = $("panel");
 
+  function sendRuntime(message, timeoutMs = 10000) {
+    if (globalThis.FTMessaging?.runtimeSend) return globalThis.FTMessaging.runtimeSend(message, timeoutMs);
+    return chrome.runtime.sendMessage(message);
+  }
+
   function fillLanguages() {
     for (const [value, label] of LANGUAGES) {
       const source = document.createElement("option");
@@ -135,7 +140,7 @@
     if (routeBusy) return;
     routeBusy = true;
     try {
-      const r = await chrome.runtime.sendMessage({ type: "FT_DIAGNOSTICS" });
+      const r = await sendRuntime({ type: "FT_DIAGNOSTICS" }, 10000);
       const runtime = r?.diagnostics?.lastRuntime;
       const pool = r?.diagnostics?.providerPoolLastRoute;
       const actual = pool?.provider || runtime?.actualRoute;
@@ -182,6 +187,7 @@
 
   function togglePanel(force) {
     opened = typeof force === "boolean" ? force : !opened;
+    host.style.pointerEvents = opened ? "auto" : "none";
     panel.classList.toggle("open", opened);
     panel.style.display = opened ? "block" : "none";
     fab.setAttribute("aria-expanded", opened ? "true" : "false");
@@ -195,7 +201,7 @@
   async function openOptionsSafe() {
     $("status").textContent = "正在打开完整设置…";
     try {
-      const response = await chrome.runtime.sendMessage({ type: "FT_OPEN_OPTIONS" });
+      const response = await sendRuntime({ type: "FT_OPEN_OPTIONS" }, 10000);
       if (response?.ok) {
         togglePanel(false);
         return;
@@ -280,7 +286,17 @@
     }, { passive: true });
   }
 
-  $("close").addEventListener("click", () => togglePanel(false));
+  const closeButton = $("close");
+  closeButton.addEventListener("pointerup", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    togglePanel(false);
+  });
+  closeButton.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    togglePanel(false);
+  });
   $("enabled").addEventListener("change", event => saveSync({ enabled: event.target.checked }));
   $("auto").addEventListener("change", event => saveSync({ autoTranslate: event.target.checked }));
   $("source").addEventListener("change", event => saveSync({ sourceLang: event.target.value }));
