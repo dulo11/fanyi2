@@ -1,0 +1,156 @@
+name: Publish Chromium ZIP v1.3.12
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-zip-v1312.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate pure ZIP runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check browser-extension/content/content-fast.js
+          node --check browser-extension/content/attribute-translator-lite.js
+          node --check browser-extension/background/main-zip.js
+          node browser-extension/tests/page-load-performance.test.cjs
+
+      - name: Prepare v1.3.12 Chromium ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=1.3.12
+          rm -rf build/chromium dist
+          mkdir -p build/chromium dist
+          cp -a browser-extension/. build/chromium/
+
+          python - <<'PY'
+          import json, re
+          from pathlib import Path
+
+          root = Path('build/chromium')
+          manifest_path = root / 'manifest.json'
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          manifest['version'] = '1.3.12'
+          manifest['description'] = '浮译浏览器版：Quetta ZIP 原生模式、页面优先性能、多引擎与持续网页翻译。'
+          manifest.pop('update_url', None)
+          manifest['background']['service_worker'] = 'background/main-zip.js'
+
+          block = manifest['content_scripts'][0]
+          new_js = []
+          for item in block['js']:
+              if item == 'compat/browser-api.js':
+                  continue
+              if item == 'content/content.js':
+                  item = 'content/content-fast.js'
+              elif item == 'content/attribute-translator.js':
+                  item = 'content/attribute-translator-lite.js'
+              new_js.append(item)
+          block['js'] = new_js
+          block['all_frames'] = False
+          block['match_about_blank'] = False
+          manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          # ZIP 版 Popup 不再显示 CRX 网站权限/重新注入卡片，也不加载 CRX API 兼容层。
+          popup_html_path = root / 'popup/popup.html'
+          popup_html = popup_html_path.read_text(encoding='utf-8')
+          popup_html = re.sub(r'\n\s*<section class="card" id="siteAccessCard">.*?</section>\n', '\n', popup_html, flags=re.S)
+          popup_html = popup_html.replace('  <script src="../compat/browser-api.js"></script>\n', '')
+          popup_html = popup_html.replace('固定签名版继续保护已经翻好的文字；', 'ZIP 版继续保护已经翻好的文字；')
+          popup_html = re.sub(r'\n\s*<section class="card" id="updateCard">.*?</section>\n', '\n', popup_html, flags=re.S)
+          popup_html_path.write_text(popup_html, encoding='utf-8')
+
+          # Popup 页面通信只走 tabs.sendMessage；失败时提示刷新，不再尝试后台补注入。
+          popup_js_path = root / 'popup/popup.js'
+          popup_js = popup_js_path.read_text(encoding='utf-8')
+          popup_js = re.sub(
+              r'async function repairPage\(\) \{.*?\n\}\n\nasync function sendToPage\(message\) \{.*?\n\}\n\nasync function loadSiteInputProfile',
+              '''async function repairPage() {\n  throw new Error("ZIP 版不使用补注入，请刷新当前网页");\n}\n\nasync function sendToPage(message) {\n  if (!activeTab?.id) return null;\n  try {\n    const response = await chrome.tabs.sendMessage(activeTab.id, message);\n    if (!response) throw new Error("网页脚本没有响应");\n    pageError = "";\n    return response;\n  } catch (error) {\n    pageError = String(error?.message || error || "网页脚本未连接");\n    return null;\n  }\n}\n\nasync function loadSiteInputProfile''',
+              popup_js,
+              flags=re.S
+          )
+          popup_js = popup_js.replace(
+              'void Promise.allSettled([refreshSiteAccess(), refreshPageState(), refreshExclusions(), refreshRuntimeRoute()]);',
+              'void Promise.allSettled([refreshPageState(), refreshExclusions(), refreshRuntimeRoute()]);'
+          )
+          popup_js_path.write_text(popup_js, encoding='utf-8')
+
+          # 设置页同样使用浏览器原生 API。
+          options_path = root / 'options/options.html'
+          options = options_path.read_text(encoding='utf-8').replace('  <script src="../compat/browser-api.js"></script>\n', '')
+          options_path.write_text(options, encoding='utf-8')
+          PY
+
+          # CRX 专用兼容文件不进入 ZIP 包。
+          rm -rf build/chromium/tests build/chromium/compat/firefox
+          rm -f build/chromium/compat/browser-api.js
+          rm -f build/chromium/background/page-injector.js build/chromium/background/main.js
+          rm -f build/chromium/content/content.js build/chromium/content/attribute-translator.js build/chromium/content/frame-performance-guard.js
+
+          python -m json.tool build/chromium/manifest.json >/dev/null
+          node --check build/chromium/background/main-zip.js
+          node --check build/chromium/popup/popup.js
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('build/chromium')
+          manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+          assert manifest['version'] == '1.3.12'
+          assert 'update_url' not in manifest
+          assert manifest['background']['service_worker'] == 'background/main-zip.js'
+          block = manifest['content_scripts'][0]
+          assert 'compat/browser-api.js' not in block['js']
+          assert 'content/content-fast.js' in block['js']
+          assert 'content/attribute-translator-lite.js' in block['js']
+          assert block.get('all_frames') is False
+          assert block.get('match_about_blank') is False
+          assert 'siteAccessCard' not in (root / 'popup/popup.html').read_text(encoding='utf-8')
+          assert 'page-injector.js' not in (root / 'background/main-zip.js').read_text(encoding='utf-8')
+          for rel in block['js'] + block.get('css', []):
+              assert (root / rel).is_file(), rel
+          PY
+
+          cd build/chromium
+          zip -r "../../dist/FloatingTranslator-Chromium-v${VERSION}.zip" . -x '*.DS_Store' -x '*.git*'
+          cd ../..
+          sha256sum "dist/FloatingTranslator-Chromium-v${VERSION}.zip" > "dist/SHA256SUMS-v${VERSION}.txt"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=browser-v1.3.12
+          ZIP=dist/FloatingTranslator-Chromium-v1.3.12.zip
+          SUM=dist/SHA256SUMS-v1.3.12.txt
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" "$SUM" --clobber
+          else
+            gh release create "$TAG" "$ZIP" "$SUM" \
+              --target "$GITHUB_SHA" \
+              --title '浮译 浏览器版 v1.3.12（纯 ZIP 版）' \
+              --notes 'Quetta ZIP 专用：移除 CRX 补注入器、动态 content-script 注册、browser-api callback 兼容层和 CRX 更新 UI；清理 v1.3.11 动态脚本，只保留 manifest 原生静态脚本与页面优先性能核心。'
+          fi
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatingTranslator-Chromium-v1.3.12
+          path: |
+            dist/FloatingTranslator-Chromium-v1.3.12.zip
+            dist/SHA256SUMS-v1.3.12.txt
+          if-no-files-found: error
+          retention-days: 30
