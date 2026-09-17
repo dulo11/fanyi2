@@ -11,7 +11,8 @@ assert.equal(manifest.name, '浮译');
 assert.equal(manifest.background.service_worker, 'background/main.js');
 
 const scripts = manifest.content_scripts?.[0]?.js || [];
-assert.deepEqual(scripts.slice(0, 8), [
+assert.deepEqual(scripts.slice(0, 9), [
+  'shared/messaging-compat.js',
   'compat/browser-api.js',
   'shared/language-core.js',
   'content/site-exclusions.js',
@@ -22,6 +23,11 @@ assert.deepEqual(scripts.slice(0, 8), [
   'content/attribute-translator.js'
 ]);
 for (const rel of scripts) assert.equal(fs.existsSync(path.join(root, rel)), true, `${rel} must exist`);
+
+const messaging = read('shared/messaging-compat.js');
+assert.match(messaging, /runtimeSend/);
+assert.match(messaging, /tabsSend/);
+assert.match(messaging, /callback/);
 
 const compat = read('compat/browser-api.js');
 assert.match(compat, /moz-extension/);
