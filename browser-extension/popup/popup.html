@@ -19,6 +19,17 @@
       </label>
     </header>
 
+    <section class="card" id="siteAccessCard">
+      <strong>网页访问权限</strong>
+      <div id="siteAccessStatus" class="host">正在检测网站访问权限…</div>
+      <div id="injectionStatus" class="host">页面脚本：正在检测…</div>
+      <div class="actions">
+        <button id="grantSiteAccess" class="primary">授权网页翻译</button>
+        <button id="retryInjection">重新注入当前网页</button>
+      </div>
+      <div class="host">如果 CRX 安装后浏览器没有自动授予网站访问权限，可在这里主动请求；授权成功后会立即重新注入当前网页。</div>
+    </section>
+
     <section class="card">
       <label class="check-row">
         <input id="autoTranslate" type="checkbox">

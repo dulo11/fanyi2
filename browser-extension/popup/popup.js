@@ -35,6 +35,8 @@ let repairing = null;
 let repairAttempted = false;
 let pageError = "";
 let refreshBusy = false;
+let siteAccessGranted = null;
+const ALL_SITES_PERMISSION = { origins: ["<all_urls>"] };
 
 function appendLanguageOptions(select, includeAuto) {
   for (const [value, label] of LANGUAGES) {
@@ -65,6 +67,90 @@ function hostFromTab(tab) {
   } catch { return ""; }
 }
 
+function currentOriginPattern() {
+  try {
+    const url = new URL(activeTab?.url || "");
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    return `${url.origin}/*`;
+  } catch { return ""; }
+}
+
+function setInjectionStatus(text) {
+  const el = $("injectionStatus");
+  if (el) el.textContent = text;
+}
+
+async function refreshSiteAccess() {
+  const status = $("siteAccessStatus");
+  const grant = $("grantSiteAccess");
+  if (!currentHost) {
+    siteAccessGranted = false;
+    if (status) status.textContent = "网站访问：当前不是普通 http/https 网页";
+    if (grant) grant.disabled = true;
+    return false;
+  }
+  if (!chrome.permissions?.contains) {
+    siteAccessGranted = null;
+    if (status) status.textContent = "网站访问：浏览器未提供 permissions API";
+    if (grant) grant.disabled = false;
+    return false;
+  }
+  try {
+    const origin = currentOriginPattern();
+    const [allSites, currentSite] = await Promise.all([
+      chrome.permissions.contains(ALL_SITES_PERMISSION),
+      origin ? chrome.permissions.contains({ origins: [origin] }) : Promise.resolve(false)
+    ]);
+    siteAccessGranted = Boolean(allSites || currentSite);
+    if (status) {
+      status.textContent = allSites
+        ? "网站访问：已授权所有网站"
+        : currentSite
+          ? `网站访问：已授权当前网站（${currentHost}）`
+          : `网站访问：未授权（${currentHost}）`;
+    }
+    if (grant) {
+      grant.disabled = false;
+      grant.textContent = siteAccessGranted ? "重新请求网页权限" : "授权网页翻译";
+    }
+    return siteAccessGranted;
+  } catch (error) {
+    siteAccessGranted = null;
+    if (status) status.textContent = `网站访问：检测失败 · ${error?.message || error}`;
+    if (grant) grant.disabled = false;
+    return false;
+  }
+}
+
+async function requestSiteAccess() {
+  const status = $("siteAccessStatus");
+  if (!currentHost) throw new Error("请先打开普通 http/https 网页");
+  if (!chrome.permissions?.request) throw new Error("当前浏览器没有提供网页权限请求接口");
+  if (status) status.textContent = "网站访问：正在请求浏览器授权…";
+
+  let granted = false;
+  let allError = null;
+  try {
+    granted = Boolean(await chrome.permissions.request(ALL_SITES_PERMISSION));
+  } catch (error) {
+    allError = error;
+  }
+
+  if (!granted) {
+    const origin = currentOriginPattern();
+    if (origin) {
+      try { granted = Boolean(await chrome.permissions.request({ origins: [origin] })); }
+      catch (error) { if (!allError) allError = error; }
+    }
+  }
+
+  await refreshSiteAccess();
+  if (!granted && siteAccessGranted !== true) {
+    throw new Error(allError?.message || "浏览器没有授予网页访问权限");
+  }
+  return true;
+}
+
 async function repairPage() {
   if (repairing) return repairing;
   if (repairAttempted) throw new Error("网页脚本恢复失败，请刷新网页后重试");
@@ -74,8 +160,10 @@ async function repairPage() {
     if (!chrome.scripting?.executeScript) throw new Error("当前浏览器不支持脚本恢复，请刷新网页并检查扩展的网站访问权限");
     const block = chrome.runtime.getManifest().content_scripts[0];
     const target = { tabId: activeTab.id, frameIds: [0] };
+    setInjectionStatus("页面脚本：正在主动注入…");
     await chrome.scripting.insertCSS({ target, files: block.css });
     await chrome.scripting.executeScript({ target, files: block.js });
+    setInjectionStatus("页面脚本：已主动注入，正在连接…");
   })();
   try { await repairing; } finally { repairing = null; }
 }
@@ -86,6 +174,7 @@ async function sendToPage(message) {
     const response = await chrome.tabs.sendMessage(activeTab.id, message, { frameId: 0 });
     if (!response) throw new Error("网页脚本没有响应");
     pageError = "";
+    setInjectionStatus("页面脚本：已连接");
     return response;
   } catch (error) {
     try {
@@ -93,9 +182,11 @@ async function sendToPage(message) {
       const response = await chrome.tabs.sendMessage(activeTab.id, message, { frameId: 0 });
       if (!response) throw new Error("网页脚本没有响应，请刷新网页");
       pageError = "";
+      setInjectionStatus("页面脚本：已连接（自动修复成功）");
       return response;
     } catch (repairError) {
       pageError = String(repairError?.message || error?.message || error);
+      setInjectionStatus(`页面脚本：未连接 · ${pageError}`);
       return null;
     }
   }
@@ -164,6 +255,8 @@ function render() {
   $("swapInputLang").title = $("swapInputLang").disabled ? "先把输入语言改成具体语言后才能交换" : "交换输入与发送语言";
   $("pickExclusion").disabled = !currentHost;
   $("clearExclusions").disabled = !currentHost;
+  if ($("grantSiteAccess")) $("grantSiteAccess").disabled = !currentHost;
+  if ($("retryInjection")) $("retryInjection").disabled = !currentHost;
 }
 
 async function saveSync(patch) {
@@ -222,6 +315,32 @@ async function refreshExclusions() {
 }
 
 function bindControls() {
+  $("grantSiteAccess")?.addEventListener("click", async () => {
+    try {
+      await requestSiteAccess();
+      repairAttempted = false;
+      await repairPage();
+      await Promise.allSettled([refreshPageState(), refreshExclusions()]);
+    } catch (error) {
+      const message = String(error?.message || error);
+      $("siteAccessStatus").textContent = `网站访问：授权失败 · ${message}`;
+      setInjectionStatus(`页面脚本：未连接 · ${message}`);
+    }
+  });
+
+  $("retryInjection")?.addEventListener("click", async () => {
+    repairAttempted = false;
+    pageError = "";
+    try {
+      await repairPage();
+      await Promise.allSettled([refreshPageState(), refreshExclusions(), refreshSiteAccess()]);
+    } catch (error) {
+      pageError = String(error?.message || error);
+      setInjectionStatus(`页面脚本：重新注入失败 · ${pageError}`);
+      $("pageState").textContent = `网页连接失败：${pageError}`;
+    }
+  });
+
   $("enabled").addEventListener("change", event => saveSync({ enabled: event.target.checked }));
   $("autoTranslate").addEventListener("change", event => saveSync({ autoTranslate: event.target.checked }));
   $("fallbackGoogleQuick").addEventListener("change", event => saveLocal({ fallbackGoogle: event.target.checked }));
@@ -312,7 +431,7 @@ async function init() {
   }
 
   render();
-  void Promise.allSettled([refreshPageState(), refreshExclusions(), refreshRuntimeRoute()]);
+  void Promise.allSettled([refreshSiteAccess(), refreshPageState(), refreshExclusions(), refreshRuntimeRoute()]);
 
   setInterval(async () => {
     if (refreshBusy) return;

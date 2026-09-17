@@ -129,6 +129,9 @@
     for (const area of [chrome.storage?.sync, chrome.storage?.local]) {
       for (const name of ["get", "set", "remove", "clear"]) wrapAsync(area, name);
     }
+    // Quetta 的侧载 CRX 可能把主机访问权限保持为 withheld；permissions API
+    // 同样优先走 callback，确保运行时授权按钮在 Android Chromium 上可靠返回。
+    for (const name of ["contains", "request", "remove", "getAll"]) wrapAsync(chrome.permissions, name, 10000);
     for (const name of ["executeScript", "insertCSS"]) wrapAsync(chrome.scripting, name, 10000);
     wrapAsync(chrome.tabs, "create");
 
