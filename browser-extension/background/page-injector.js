@@ -1,7 +1,6 @@
 (() => {
   const state = globalThis.__FT_PAGE_INJECTOR_STATE__ ||= {
     inflight: new Map(),
-    attemptedUrl: new Map(),
     lastDiagnostic: null
   };
 
@@ -16,7 +15,7 @@
     catch { return ""; }
   }
 
-  function pingTab(tabId, timeoutMs = 1600) {
+  function pingTab(tabId, timeoutMs = 1200) {
     return new Promise(resolve => {
       let settled = false;
       const finish = value => {
@@ -43,8 +42,8 @@
 
     let result;
     try {
-      // Quetta 的 CRX 在 callback 形式下会出现 callback 永不返回。
-      // 这里故意直接调用原生 API，不传 callback。
+      // Quetta 的固定签名 CRX 在 callback 形式下可能永不回调。
+      // 手动修复时直接调用浏览器原生 API，不传 callback。
       result = fn.call(chrome.scripting, payload);
     } catch (error) {
       throw error;
@@ -134,7 +133,7 @@
     } catch {}
   }
 
-  async function injectContentScripts(tabId, url, reason = "fallback") {
+  async function injectContentScripts(tabId, url, reason = "manual") {
     if (!Number.isInteger(tabId) || tabId < 0 || !isWebUrl(url)) return false;
     if (state.inflight.has(tabId)) return state.inflight.get(tabId);
 
@@ -148,7 +147,7 @@
       const block = manifest.content_scripts?.[0];
       if (!block?.js?.length) throw new Error("manifest 中没有网页脚本列表");
 
-      // CSS 只是界面样式。Quetta CRX 的 insertCSS 可能永远不返回，绝不能因此阻断翻译 JS。
+      // CSS 只影响界面样式；手动修复时即使 CSS 失败也继续执行翻译 JS。
       for (const cssFile of block.css || []) {
         try {
           const cssResult = await insertSingleCss(tabId, cssFile);
@@ -172,10 +171,10 @@
       }
 
       await sleep(180);
-      const connected = await pingTab(tabId, 3000);
+      const connected = await pingTab(tabId, 2500);
       await saveDiagnostic({
         ok: connected,
-        method: "native-no-callback-sequential",
+        method: "manual-native-sequential",
         tabId,
         url,
         reason,
@@ -186,7 +185,7 @@
       return true;
     })()
       .catch(error => {
-        console.warn("[浮译] CRX 网页脚本补注入失败", { tabId, url, reason, error: error?.message || error });
+        console.warn("[浮译] 手动网页脚本补注入失败", { tabId, url, reason, error: error?.message || error });
         return false;
       })
       .finally(() => state.inflight.delete(tabId));
@@ -195,31 +194,9 @@
     return task;
   }
 
-  function schedule(tabId, url, reason) {
-    if (!isWebUrl(url)) return;
-    const key = `${tabId}:${url}`;
-    if (state.attemptedUrl.get(tabId) === key && reason !== "manual") return;
-    state.attemptedUrl.set(tabId, key);
-    setTimeout(() => { void injectContentScripts(tabId, url, reason); }, 180);
-  }
-
-  try {
-    chrome.tabs?.onUpdated?.addListener((tabId, changeInfo, tab) => {
-      if (changeInfo.status === "complete") schedule(tabId, tab?.url || changeInfo.url || "", "tab-complete");
-    });
-  } catch (error) {
-    console.warn("[浮译] 无法监听标签页加载完成", error);
-  }
-
-  try {
-    chrome.tabs?.onActivated?.addListener(activeInfo => {
-      chrome.tabs.get?.(activeInfo.tabId, tab => {
-        if (lastErrorMessage()) return;
-        schedule(activeInfo.tabId, tab?.url || "", "tab-activated");
-      });
-    });
-  } catch {}
-
+  // 性能原则：正常 ZIP/标准 Chromium 只走 manifest.content_scripts。
+  // 不再监听 tabs.onUpdated / tabs.onActivated，不在页面加载或切换标签时自动 ping/补注入。
+  // 只有用户明确点击“重新注入当前网页”时，才触发下面的 CRX 兼容修复路径。
   try {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message?.type !== "FT_REPAIR_CURRENT_PAGE") return undefined;
