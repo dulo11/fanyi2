@@ -153,19 +153,36 @@ async function requestSiteAccess() {
 
 async function repairPage() {
   if (repairing) return repairing;
-  if (repairAttempted) throw new Error("网页脚本恢复失败，请刷新网页后重试");
+  if (repairAttempted) throw new Error(pageError || "网页脚本恢复失败，请刷新网页后重试");
   repairAttempted = true;
   repairing = (async () => {
     if (!currentHost) throw new Error("浏览器内部页不允许注入，请打开普通网页");
-    if (!chrome.scripting?.executeScript) throw new Error("当前浏览器不支持脚本恢复，请刷新网页并检查扩展的网站访问权限");
-    const block = chrome.runtime.getManifest().content_scripts[0];
-    const target = { tabId: activeTab.id, frameIds: [0] };
-    setInjectionStatus("页面脚本：正在主动注入…");
-    await chrome.scripting.insertCSS({ target, files: block.css });
-    await chrome.scripting.executeScript({ target, files: block.js });
-    setInjectionStatus("页面脚本：已主动注入，正在连接…");
+    if (!activeTab?.id) throw new Error("无法读取当前标签页");
+
+    setInjectionStatus("页面脚本：正在通过后台补注入…");
+    const response = await chrome.runtime.sendMessage({
+      type: "FT_REPAIR_CURRENT_PAGE",
+      tabId: activeTab.id,
+      url: activeTab.url || ""
+    });
+
+    if (!response?.ok) {
+      const diagnostic = response?.diagnostic || {};
+      const detail = diagnostic.file
+        ? `${diagnostic.stage || "注入"} · ${diagnostic.file} · ${diagnostic.error || "失败"}`
+        : diagnostic.error || "后台补注入失败";
+      throw new Error(detail);
+    }
+    setInjectionStatus("页面脚本：后台补注入完成，正在连接…");
   })();
-  try { await repairing; } finally { repairing = null; }
+  try {
+    await repairing;
+  } catch (error) {
+    pageError = String(error?.message || error);
+    throw error;
+  } finally {
+    repairing = null;
+  }
 }
 
 async function sendToPage(message) {
