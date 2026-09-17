@@ -56,7 +56,9 @@ function populateLanguages() {
 }
 
 async function getActiveTab() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tabs = globalThis.FTMessaging?.tabsQuery
+    ? await globalThis.FTMessaging.tabsQuery({ active: true, currentWindow: true })
+    : await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0] || null;
 }
 
@@ -238,7 +240,9 @@ function routeLabel(route) {
 
 async function refreshRuntimeRoute() {
   try {
-    const response = await chrome.runtime.sendMessage({ type: "FT_DIAGNOSTICS" });
+    const response = globalThis.FTMessaging?.runtimeSend
+      ? await globalThis.FTMessaging.runtimeSend({ type: "FT_DIAGNOSTICS" }, 10000)
+      : await chrome.runtime.sendMessage({ type: "FT_DIAGNOSTICS" });
     const runtime = response?.diagnostics?.lastRuntime;
     if (!runtime) {
       $("runtimeRoute").textContent = "最近翻译路径：暂无记录";
