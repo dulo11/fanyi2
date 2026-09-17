@@ -1,0 +1,80 @@
+name: Build Signed CRX v1.3.6 Test
+
+on:
+  push:
+    branches:
+      - fix/v1.3.6-quetta-site-access
+    paths:
+      - '.github/workflows/build-signed-v136-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-signed-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate and restore fixed signing key
+        shell: bash
+        env:
+          FT_CRX_PRIVATE_KEY_B64: ${{ secrets.FT_CRX_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "${FT_CRX_PRIVATE_KEY_B64:-}"
+          printf '%s' "$FT_CRX_PRIVATE_KEY_B64" | base64 --decode > "$RUNNER_TEMP/FloatingTranslator-private.pem"
+          chmod 600 "$RUNNER_TEMP/FloatingTranslator-private.pem"
+          openssl rsa -in "$RUNNER_TEMP/FloatingTranslator-private.pem" -check -noout
+          node <<'JS'
+          const fs = require('node:fs');
+          const crypto = require('node:crypto');
+          const manifest = require('./browser-extension/manifest.json');
+          if (manifest.version !== '1.3.6') throw new Error(`Expected v1.3.6, got ${manifest.version}`);
+          const pem = fs.readFileSync(process.env.RUNNER_TEMP + '/FloatingTranslator-private.pem');
+          const publicDer = crypto.createPublicKey(pem).export({ type: 'spki', format: 'der' });
+          if (!publicDer.equals(Buffer.from(manifest.key, 'base64'))) throw new Error('Signing key does not match fixed extension ID');
+          JS
+
+      - name: Validate JavaScript and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do node --check "$file"; done < <(find browser-extension -name '*.js' -print0)
+          node --test browser-extension/tests/*.test.cjs
+
+      - name: Prepare Chromium package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/chromium dist
+          mkdir -p build/chromium dist
+          cp -a browser-extension/. build/chromium/
+          rm -rf build/chromium/tests build/chromium/compat/firefox
+          find build/chromium -name '*.DS_Store' -delete
+
+      - name: Build fixed-signature CRX3 and ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --omit=dev crx3@2.0.0
+          crx3 -p "$RUNNER_TEMP/FloatingTranslator-private.pem" -o dist/FloatingTranslator-Chromium-v1.3.6-TEST.crx build/chromium
+          (cd build/chromium && zip -qr ../../dist/FloatingTranslator-Chromium-v1.3.6-TEST.zip .)
+          (cd dist && sha256sum FloatingTranslator-Chromium-v1.3.6-TEST.crx FloatingTranslator-Chromium-v1.3.6-TEST.zip > SHA256SUMS.txt)
+
+      - name: Remove temporary signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/FloatingTranslator-private.pem"
+
+      - name: Upload test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fuyi-Signed-v1.3.6-Quetta-Test
+          path: |
+            dist/FloatingTranslator-Chromium-v1.3.6-TEST.crx
+            dist/FloatingTranslator-Chromium-v1.3.6-TEST.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
