@@ -27,6 +27,7 @@
         "<all_urls>"
       ],
       "js": [
+        "shared/messaging-compat.js",
         "compat/browser-api.js",
         "shared/language-core.js",
         "content/site-exclusions.js",
