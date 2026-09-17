@@ -1,8 +1,11 @@
 (() => {
   const state = globalThis.__FT_PAGE_INJECTOR_STATE__ ||= {
     inflight: new Map(),
-    attemptedUrl: new Map()
+    attemptedUrl: new Map(),
+    lastDiagnostic: null
   };
+
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   function isWebUrl(url) {
     return /^https?:\/\//i.test(String(url || ""));
@@ -34,70 +37,100 @@
     });
   }
 
-  function executeSingle(tabId, file) {
-    return new Promise((resolve, reject) => {
-      const target = { tabId };
-      const fail = error => reject(error instanceof Error ? error : new Error(String(error || "注入失败")));
-      try {
-        if (chrome.scripting?.executeScript) {
-          chrome.scripting.executeScript({ target, files: [file] }, result => {
-            const message = lastErrorMessage();
-            if (message) fail(new Error(message));
-            else resolve(result);
-          });
-          return;
-        }
-        if (chrome.tabs?.executeScript) {
-          chrome.tabs.executeScript(tabId, { file, runAt: "document_idle" }, result => {
-            const message = lastErrorMessage();
-            if (message) fail(new Error(message));
-            else resolve(result);
-          });
-          return;
-        }
-        fail(new Error("浏览器没有可用的脚本注入 API"));
-      } catch (error) {
-        fail(error);
-      }
-    });
+  async function invokeScripting(name, payload, graceMs = 450) {
+    const fn = chrome.scripting?.[name];
+    if (typeof fn !== "function") throw new Error(`浏览器没有 scripting.${name}`);
+
+    let result;
+    try {
+      // Quetta 的 CRX 在 callback 形式下会出现 callback 永不返回。
+      // 这里故意直接调用原生 API，不传 callback。
+      result = fn.call(chrome.scripting, payload);
+    } catch (error) {
+      throw error;
+    }
+
+    if (!result || typeof result.then !== "function") {
+      await sleep(100);
+      return { completed: true, value: result, mode: "fire-and-forget" };
+    }
+
+    const raced = await Promise.race([
+      Promise.resolve(result).then(
+        value => ({ completed: true, value }),
+        error => ({ completed: true, error })
+      ),
+      sleep(graceMs).then(() => ({ completed: false }))
+    ]);
+
+    if (raced.completed && raced.error) throw raced.error;
+    return raced;
   }
 
-  function insertSingleCss(tabId, file) {
-    return new Promise((resolve, reject) => {
-      const target = { tabId };
-      const fail = error => reject(error instanceof Error ? error : new Error(String(error || "样式注入失败")));
-      try {
-        if (chrome.scripting?.insertCSS) {
-          chrome.scripting.insertCSS({ target, files: [file] }, () => {
+  async function executeSingle(tabId, file) {
+    const target = { tabId };
+    if (chrome.scripting?.executeScript) {
+      return invokeScripting("executeScript", { target, files: [file] }, 500);
+    }
+
+    if (chrome.tabs?.executeScript) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const done = (ok, value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          ok ? resolve(value) : reject(value);
+        };
+        const timer = setTimeout(() => done(true, { completed: false, mode: "legacy-timeout" }), 700);
+        try {
+          chrome.tabs.executeScript(tabId, { file, runAt: "document_idle" }, result => {
             const message = lastErrorMessage();
-            if (message) fail(new Error(message));
-            else resolve(true);
+            if (message) done(false, new Error(message));
+            else done(true, { completed: true, value: result, mode: "legacy-callback" });
           });
-          return;
+        } catch (error) {
+          done(false, error);
         }
-        if (chrome.tabs?.insertCSS) {
+      });
+    }
+
+    throw new Error("浏览器没有可用的脚本注入 API");
+  }
+
+  async function insertSingleCss(tabId, file) {
+    const target = { tabId };
+    if (chrome.scripting?.insertCSS) {
+      return invokeScripting("insertCSS", { target, files: [file] }, 250);
+    }
+
+    if (chrome.tabs?.insertCSS) {
+      return new Promise(resolve => {
+        let settled = false;
+        const done = value => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        };
+        const timer = setTimeout(() => done({ completed: false, mode: "legacy-timeout" }), 350);
+        try {
           chrome.tabs.insertCSS(tabId, { file, runAt: "document_idle" }, () => {
-            const message = lastErrorMessage();
-            if (message) fail(new Error(message));
-            else resolve(true);
+            done({ completed: !lastErrorMessage(), mode: "legacy-callback" });
           });
-          return;
+        } catch {
+          done({ completed: false, mode: "legacy-error" });
         }
-        resolve(false);
-      } catch (error) {
-        fail(error);
-      }
-    });
+      });
+    }
+
+    return { completed: false, mode: "unsupported" };
   }
 
   async function saveDiagnostic(payload) {
+    state.lastDiagnostic = { ...payload, at: Date.now() };
     try {
-      await chrome.storage.local.set({
-        quettaPageInjectorV1: {
-          ...payload,
-          at: Date.now()
-        }
-      });
+      await chrome.storage.local.set({ quettaPageInjectorV1: state.lastDiagnostic });
     } catch {}
   }
 
@@ -115,28 +148,41 @@
       const block = manifest.content_scripts?.[0];
       if (!block?.js?.length) throw new Error("manifest 中没有网页脚本列表");
 
+      // CSS 只是界面样式。Quetta CRX 的 insertCSS 可能永远不返回，绝不能因此阻断翻译 JS。
       for (const cssFile of block.css || []) {
         try {
-          await insertSingleCss(tabId, cssFile);
+          const cssResult = await insertSingleCss(tabId, cssFile);
+          if (cssResult?.completed === false) {
+            await saveDiagnostic({ ok: null, stage: "css-warning", file: cssFile, error: "CSS 注入未确认，已继续注入 JS", tabId, url, reason });
+          }
         } catch (error) {
-          await saveDiagnostic({ ok: false, stage: "css", file: cssFile, error: String(error?.message || error), tabId, url, reason });
-          throw new Error(`样式 ${cssFile} 注入失败：${error?.message || error}`);
+          await saveDiagnostic({ ok: null, stage: "css-warning", file: cssFile, error: String(error?.message || error), tabId, url, reason });
         }
       }
 
+      const uncertainFiles = [];
       for (const jsFile of block.js) {
         try {
-          await executeSingle(tabId, jsFile);
+          const result = await executeSingle(tabId, jsFile);
+          if (result?.completed === false) uncertainFiles.push(jsFile);
         } catch (error) {
           await saveDiagnostic({ ok: false, stage: "js", file: jsFile, error: String(error?.message || error), tabId, url, reason });
           throw new Error(`脚本 ${jsFile} 注入失败：${error?.message || error}`);
         }
       }
 
-      await new Promise(resolve => setTimeout(resolve, 80));
-      const connected = await pingTab(tabId, 2500);
-      await saveDiagnostic({ ok: connected, method: "sequential-files", tabId, url, reason, error: connected ? "" : "全部文件注入后页面脚本仍未响应" });
-      if (!connected) throw new Error("全部文件注入完成，但页面脚本仍未响应");
+      await sleep(180);
+      const connected = await pingTab(tabId, 3000);
+      await saveDiagnostic({
+        ok: connected,
+        method: "native-no-callback-sequential",
+        tabId,
+        url,
+        reason,
+        uncertainFiles,
+        error: connected ? "" : `脚本已派发但页面仍未响应${uncertainFiles.length ? `；未确认：${uncertainFiles.join(", ")}` : ""}`
+      });
+      if (!connected) throw new Error(state.lastDiagnostic.error);
       return true;
     })()
       .catch(error => {
@@ -179,7 +225,9 @@
       if (message?.type !== "FT_REPAIR_CURRENT_PAGE") return undefined;
       const tabId = Number(message.tabId ?? sender?.tab?.id);
       const url = String(message.url || sender?.tab?.url || "");
-      injectContentScripts(tabId, url, "manual").then(ok => sendResponse({ ok }));
+      injectContentScripts(tabId, url, "manual").then(ok => {
+        sendResponse({ ok, diagnostic: state.lastDiagnostic });
+      });
       return true;
     });
   } catch {}
