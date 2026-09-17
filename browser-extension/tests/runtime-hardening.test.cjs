@@ -131,6 +131,6 @@ for (const id of ['addAzureCredential', 'addBaiduCredential', 'addAliyunCredenti
 }
 
 assert.match(manifest.key, /^[A-Za-z0-9+/]+=*$/);
-assert.equal(manifest.update_url, 'https://raw.githubusercontent.com/dulo11/fanyireal-time/extension-update-channel/updates.xml');
+assert.equal(manifest.update_url, 'https://raw.githubusercontent.com/dulo11/fanyi2/extension-update-channel/updates.xml');
 
 console.log('runtime hardening tests passed');
