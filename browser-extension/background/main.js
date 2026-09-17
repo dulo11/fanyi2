@@ -31,6 +31,8 @@
 
   // shared/provider/telemetry 都属于增强模块；任何一个失败都不应拖死核心翻译。
   safeImport("../compat/browser-api.js", true);
+  // Quetta 固定签名 CRX 上 insertCSS 可能不回调；CSS 不能阻断 JS 注入。
+  safeImport("../compat/quetta-css-shim.js");
   safeImport("../shared/crypto-lite.js");
   safeImport("../shared/glossary-core.js");
   safeImport("service-worker.js", true);
