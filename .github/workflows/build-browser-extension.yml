@@ -1,0 +1,162 @@
+name: Build Browser Extension
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'browser-extension/**'
+      - '.github/workflows/build-browser-extension.yml'
+  pull_request:
+    paths:
+      - 'browser-extension/**'
+      - '.github/workflows/build-browser-extension.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-browser-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate manifests and required files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m json.tool browser-extension/manifest.json >/dev/null
+          python -m json.tool browser-extension/compat/firefox/manifest.json >/dev/null
+          test -f browser-extension/compat/browser-api.js
+          test -f browser-extension/shared/language-core.js
+          test -f browser-extension/shared/glossary-core.js
+          test -f browser-extension/shared/crypto-lite.js
+          test -f browser-extension/background/main.js
+          test -f browser-extension/background/service-worker.js
+          test -f browser-extension/background/provider-pool.js
+          test -f browser-extension/background/glossary-runtime.js
+          test -f browser-extension/background/runtime-telemetry.js
+          test -f browser-extension/background/cache-stats.js
+          test -f browser-extension/background/runtime-extras.js
+          test -f browser-extension/content/site-exclusions.js
+          test -f browser-extension/content/site-input-profile.js
+          test -f browser-extension/content/content.js
+          test -f browser-extension/content/v02-enhancements.js
+          test -f browser-extension/content/mixed-page-guard.js
+          test -f browser-extension/content/attribute-translator.js
+          test -f browser-extension/content/floating-panel-bridge.js
+          test -f browser-extension/content/floating-panel.js
+          test -f browser-extension/popup/popup.html
+          test -f browser-extension/options/options.html
+          test -f browser-extension/options/provider-pool-ui.js
+          test -f browser-extension/tests/language-core.test.cjs
+          test -f browser-extension/tests/glossary-core.test.cjs
+          test -f browser-extension/tests/crypto-lite.test.cjs
+          test -f browser-extension/tests/runtime-hardening.test.cjs
+          test -f browser-extension/tests/cross-browser.test.cjs
+          test -f browser-extension/tests/signed-update.test.cjs
+          test -f browser-extension/tests/floating-panel.test.cjs
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('browser-extension')
+          chromium = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+          firefox = json.loads((root / 'compat/firefox/manifest.json').read_text(encoding='utf-8'))
+          assert chromium['version'] == firefox['version']
+          assert chromium['name'] == firefox['name'] == '浮译'
+          assert chromium.get('key')
+          worker = chromium['background']['service_worker']
+          assert worker == 'background/main.js', worker
+          assert (root / worker).is_file(), worker
+          for manifest in (chromium, firefox):
+              for block in manifest.get('content_scripts', []):
+                  for rel in block.get('js', []):
+                      assert (root / rel).is_file(), rel
+                  for rel in block.get('css', []):
+                      assert (root / rel).is_file(), rel
+          for rel in firefox['background']['scripts']:
+              assert (root / rel).is_file(), rel
+          main = (root / 'background/main.js').read_text(encoding='utf-8')
+          for rel in ['../shared/crypto-lite.js', '../shared/glossary-core.js', 'service-worker.js', 'provider-pool.js', 'glossary-runtime.js', 'runtime-telemetry.js', 'cache-stats.js', 'runtime-extras.js']:
+              assert rel in main, rel
+          options = (root / 'options/options.html').read_text(encoding='utf-8')
+          assert 'provider-pool-ui.js' in options
+          PY
+
+      - name: Validate JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            node --check "$file"
+          done < <(find browser-extension -type f \( -name '*.js' -o -name '*.cjs' \) -print0)
+
+      - name: Run regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in browser-extension/tests/*.test.cjs; do
+            echo "Running $test"
+            node "$test"
+          done
+
+      - name: Read extension version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(python - <<'PY'
+          import json
+          with open('browser-extension/manifest.json', encoding='utf-8') as f:
+              print(json.load(f)['version'])
+          PY
+          )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Package Chromium extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cd browser-extension
+          zip -r "../dist/FloatingTranslator-Chromium-v${{ steps.version.outputs.version }}.zip" . \
+            -x '*.DS_Store' \
+            -x '*.git*' \
+            -x 'tests/*' \
+            -x 'compat/firefox/manifest.json'
+          cd ..
+          unzip -l "dist/FloatingTranslator-Chromium-v${{ steps.version.outputs.version }}.zip"
+
+      - name: Package Firefox extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/firefox
+          mkdir -p build/firefox dist
+          cp -a browser-extension/. build/firefox/
+          cp browser-extension/compat/firefox/manifest.json build/firefox/manifest.json
+          rm -rf build/firefox/tests build/firefox/compat/firefox
+          cd build/firefox
+          zip -r "../../dist/FloatingTranslator-Firefox-v${{ steps.version.outputs.version }}.zip" . \
+            -x '*.DS_Store' \
+            -x '*.git*'
+          cd ../..
+          unzip -l "dist/FloatingTranslator-Firefox-v${{ steps.version.outputs.version }}.zip"
+
+      - name: Upload Chromium ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatingTranslator-Chromium-v${{ steps.version.outputs.version }}
+          path: dist/FloatingTranslator-Chromium-v${{ steps.version.outputs.version }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Firefox ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatingTranslator-Firefox-v${{ steps.version.outputs.version }}
+          path: dist/FloatingTranslator-Firefox-v${{ steps.version.outputs.version }}.zip
+          if-no-files-found: error
+          retention-days: 30
