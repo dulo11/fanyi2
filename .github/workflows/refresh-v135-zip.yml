@@ -1,0 +1,46 @@
+name: Refresh v1.3.5 ZIP
+
+on:
+  push:
+    paths:
+      - '.github/workflows/refresh-v135-zip.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate current package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./browser-extension/manifest.json').version")" = "1.3.5"
+          node --check browser-extension/background/main.js
+          node --check browser-extension/content/content.js
+          node --test browser-extension/tests/*.test.cjs
+
+      - name: Package current fanyi2 Chromium ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist build/chromium
+          mkdir -p dist build/chromium
+          cp -a browser-extension/. build/chromium/
+          rm -rf build/chromium/tests build/chromium/compat/firefox
+          find build/chromium -name '*.DS_Store' -delete
+          (cd build/chromium && zip -qr ../../dist/FloatingTranslator-Chromium-v1.3.5.zip .)
+          unzip -p dist/FloatingTranslator-Chromium-v1.3.5.zip manifest.json | grep -F 'https://raw.githubusercontent.com/dulo11/fanyi2/extension-update-channel/updates.xml'
+
+      - name: Replace Release ZIP
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload browser-v1.3.5 dist/FloatingTranslator-Chromium-v1.3.5.zip --clobber
