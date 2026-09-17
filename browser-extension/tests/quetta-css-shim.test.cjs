@@ -5,17 +5,16 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
 
+// 兼容 shim 仍保留在仓库，方便以后单独调试 CRX；但正常 ZIP/Popup/后台不应全局加载它。
 const shim = read('compat/quetta-css-shim.js');
 assert.match(shim, /insertCSS/);
 assert.match(shim, /700/);
 assert.match(shim, /已跳过样式继续注入脚本/);
 
 const main = read('background/main.js');
-assert.match(main, /quetta-css-shim\.js/);
-assert.ok(main.indexOf('quetta-css-shim.js') < main.indexOf('page-injector.js'));
+assert.doesNotMatch(main, /quetta-css-shim\.js/);
 
 const popup = read('popup/popup.html');
-assert.match(popup, /quetta-css-shim\.js/);
-assert.ok(popup.indexOf('quetta-css-shim.js') < popup.indexOf('popup.js'));
+assert.doesNotMatch(popup, /quetta-css-shim\.js/);
 
-console.log('Quetta CSS shim contract passed');
+console.log('Quetta CSS shim isolated from normal ZIP path');
