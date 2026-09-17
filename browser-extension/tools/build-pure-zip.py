@@ -27,7 +27,7 @@ manifest["background"]["service_worker"] = "background/main-zip.js"
 block = manifest["content_scripts"][0]
 new_js = []
 for item in block["js"]:
-    if item == "compat/browser-api.js":
+    if item in ("compat/browser-api.js", "content/floating-panel-bridge.js"):
         continue
     if item == "content/content.js":
         item = "content/content-fast.js"
@@ -103,6 +103,8 @@ for path in [
 assert manifest["background"]["service_worker"] == "background/main-zip.js"
 assert "update_url" not in manifest
 assert "compat/browser-api.js" not in block["js"]
+assert "content/floating-panel-bridge.js" not in block["js"]
+assert "shared/messaging-compat.js" in block["js"]
 assert "content/content-fast.js" in block["js"]
 assert "content/attribute-translator-lite.js" in block["js"]
 assert block["all_frames"] is False
