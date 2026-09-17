@@ -56,6 +56,11 @@
   const lang = () => globalThis.FTLanguage;
   const exclusions = () => globalThis.FTSiteExclusions;
 
+  function sendRuntime(message, timeoutMs = 60000) {
+    if (globalThis.FTMessaging?.runtimeSend) return globalThis.FTMessaging.runtimeSend(message, timeoutMs);
+    return chrome.runtime.sendMessage(message);
+  }
+
   function isExcludedElement(element) {
     try { return Boolean(exclusions()?.isExcluded?.(element)); }
     catch { return false; }
@@ -318,7 +323,7 @@
       }).filter(entry => hasLetters(entry.parts.core));
       if (!entries.length) return;
 
-      const response = await chrome.runtime.sendMessage({
+      const response = await sendRuntime({
         type: "FT_TRANSLATE_DETAILED",
         texts: entries.map(entry => entry.parts.core),
         options: { sourceLang: state.settings.sourceLang, targetLang: state.settings.targetLang }
@@ -482,7 +487,7 @@
     event.stopPropagation();
 
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await sendRuntime({
         type: "FT_TRANSLATE",
         texts: [text],
         options: {
@@ -540,6 +545,62 @@
     if (state.active && !state.paused) queueScanRoot(document.body);
   }
 
+  function pageStateSnapshot() {
+    return {
+      ok: true,
+      active: state.active,
+      paused: state.paused,
+      host: location.hostname,
+      pageLang: pageLanguage(),
+      queued: state.queue.size + state.urgentQueue.size,
+      processing: state.processing,
+      processed: state.processed,
+      failed: state.failed,
+      retried: state.retried,
+      protectedRestores: state.protectedRestores,
+      lastError: state.lastError,
+      performanceMode: "page-first"
+    };
+  }
+
+  // ZIP 快捷窗直接控制当前页面，不再经后台转发回同一标签页。
+  // 这避免 Quetta 对 tabs.sendMessage/runtime.sendMessage 返回形式不同导致快捷窗“看得到但点不动”。
+  window.__FT_FAST_DIRECT_FLOATING__ = true;
+  window.addEventListener("ft-floating-command", event => {
+    const detail = event.detail || {};
+    const action = String(detail.action || "get-state");
+    try {
+      if (action === "pause-toggle") setPaused(!state.paused);
+      else if (action === "translate-now") {
+        restorePage();
+        state.paused = false;
+        state.active = true;
+        queueScanRoot(document.body);
+      } else if (action === "rescan") {
+        handleRouteRescan();
+      } else if (action === "restore") {
+        state.active = false;
+        state.paused = false;
+        restorePage();
+      } else if (action !== "get-state") {
+        throw new Error(`未知快捷操作：${action}`);
+      }
+
+      window.dispatchEvent(new CustomEvent("ft-floating-state", {
+        detail: { ...pageStateSnapshot(), requestId: detail.requestId, bridgeOk: true }
+      }));
+    } catch (error) {
+      window.dispatchEvent(new CustomEvent("ft-floating-state", {
+        detail: {
+          ...pageStateSnapshot(),
+          requestId: detail.requestId,
+          bridgeOk: false,
+          lastError: String(error?.message || error)
+        }
+      }));
+    }
+  });
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "FT_REFRESH_SETTINGS") {
       loadSettings().then(() => sendResponse({ ok: true, active: state.active, paused: state.paused }));
@@ -575,21 +636,7 @@
       return false;
     }
     if (message?.type === "FT_GET_PAGE_STATE") {
-      sendResponse({
-        ok: true,
-        active: state.active,
-        paused: state.paused,
-        host: location.hostname,
-        pageLang: pageLanguage(),
-        queued: state.queue.size + state.urgentQueue.size,
-        processing: state.processing,
-        processed: state.processed,
-        failed: state.failed,
-        retried: state.retried,
-        protectedRestores: state.protectedRestores,
-        lastError: state.lastError,
-        performanceMode: "page-first"
-      });
+      sendResponse(pageStateSnapshot());
       return false;
     }
     return false;
