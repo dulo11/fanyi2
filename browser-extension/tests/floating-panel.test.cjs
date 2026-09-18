@@ -20,6 +20,8 @@ for (const token of ['ft-floating-panel-host', '自动持续翻译网页', '翻�
 }
 assert.match(panel, /attachShadow\(\{ mode: ["']open["'] \}\)/);
 assert.match(panel, /window\.top !== window/);
+assert.doesNotMatch(panel, /position:fixed;inset:0/);
+assert.match(panel, /width:1px;height:1px/);
 
 const bridge = read('content/floating-panel-bridge.js');
 assert.match(bridge, /FT_FLOATING_PAGE_ACTION/);
