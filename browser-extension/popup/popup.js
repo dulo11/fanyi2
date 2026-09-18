@@ -305,17 +305,23 @@ function routeLabel(route) {
 
 async function refreshRuntimeRoute() {
   try {
-    const response = globalThis.FTMessaging?.runtimeSend
-      ? await globalThis.FTMessaging.runtimeSend({ type: "FT_DIAGNOSTICS" }, 10000)
-      : await chrome.runtime.sendMessage({ type: "FT_DIAGNOSTICS" });
-    const runtime = response?.diagnostics?.lastRuntime;
-    if (!runtime) {
+    const local = await chrome.storage.local.get({
+      translationRuntimeStateV1: null,
+      providerPoolLastRouteV1: null
+    });
+    const runtime = local.translationRuntimeStateV1;
+    const pool = local.providerPoolLastRouteV1;
+    const route = pool?.provider || runtime?.actualRoute || "";
+    const at = Number(pool?.at || runtime?.at || 0);
+    if (!runtime && !pool) {
       $("runtimeRoute").textContent = "最近翻译路径：暂无记录";
       return;
     }
-    const when = Number(runtime.at || 0) ? new Date(runtime.at).toLocaleTimeString() : "-";
-    const suffix = runtime.ok === false ? ` · 失败：${runtime.error || "未知错误"}` : ` · ${runtime.durationMs || 0}ms`;
-    $("runtimeRoute").textContent = `最近翻译路径：${routeLabel(runtime.actualRoute)} · ${when}${suffix}`;
+    const when = at ? new Date(at).toLocaleTimeString() : "-";
+    const failed = pool?.ok === false || runtime?.ok === false;
+    const error = pool?.error || runtime?.error || "";
+    const suffix = failed ? ` · 失败：${error || "未知错误"}` : (runtime ? ` · ${runtime.durationMs || 0}ms` : "");
+    $("runtimeRoute").textContent = `最近翻译路径：${routeLabel(route)} · ${when}${suffix}`;
   } catch {
     $("runtimeRoute").textContent = "最近翻译路径：读取失败";
   }
