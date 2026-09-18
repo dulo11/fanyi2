@@ -95,8 +95,10 @@
 
     <section>
       <h2>缓存</h2>
-      <label><span>最多保留缓存条数</span><input id="cacheMaxEntries" type="number" min="1000" max="200000" step="1000" value="30000"></label>
+      <label><span>最多保留缓存条数</span><input id="cacheMaxEntries" type="number" min="1000" max="200000" step="1000" value="10000"></label>
+      <label><span>缓存容量上限（MB）</span><input id="cacheMaxMb" type="number" min="5" max="500" step="5" value="50"></label>
       <label><span>缓存保留天数（0 = 不按日期过期）</span><input id="cacheTtlDays" type="number" min="0" max="3650" step="1" value="30"></label>
+      <p class="note">采用 LRU：超过条数或容量时优先删除最久没使用的译文；时间戳、纯数字和极短动态文本不会进入缓存。</p>
       <div class="actions"><button id="refreshCacheStats">刷新缓存统计</button><button id="pruneCache">立即整理缓存</button><button id="clearCache">清空全部缓存</button></div>
       <p id="cacheStats" class="note">缓存统计：正在读取…</p>
     </section>
