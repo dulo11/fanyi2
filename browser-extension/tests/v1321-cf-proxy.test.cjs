@@ -40,8 +40,10 @@ assert.match(worker, /MAX_ITEMS = 40/);
 assert.match(worker, /MAX_TOTAL_CHARS = 20000/);
 assert.match(worker, /MAX_ITEM_CHARS = 3400/);
 assert.match(worker, /FT_PROXY_TOKEN/);
+assert.match(worker, /translate\.google\.com\/translate_a\/single/);
 assert.match(worker, /translate\.googleapis\.com\/translate_a\/single/);
-assert.match(worker, /mapLimit\(texts, 6/);
+assert.match(worker, /mapLimit\(texts, 2/);
+assert.match(worker, /Cloudflare 出口限流/);
 assert.doesNotMatch(worker, /fetch\(payload\?\.url|fetch\(body\?\.url/, 'worker must not be an open arbitrary URL proxy');
 
 
