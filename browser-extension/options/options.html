@@ -76,6 +76,20 @@
       <p class="note">保留长网页、动态内容、属性文字、Shadow DOM、术语表、排除区域、防覆盖恢复、暂停续跑和精确失败重试。</p>
     </section>
 
+    <section id="ruleManagerSection">
+      <h2>翻译规则管理</h2>
+      <label><span>搜索已有规则</span><input id="ruleSearch" type="text" placeholder="搜索网站、网页、通配规则或排除区域"></label>
+
+      <h3>新增网址通配规则</h3>
+      <label><span>网址模式</span><input id="urlPatternInput" type="text" spellcheck="false" placeholder="例如 github.com/*/issues/*"></label>
+      <label><span>匹配后</span><select id="urlPatternAction"><option value="never">不翻译</option><option value="always">始终翻译</option></select></label>
+      <div class="actions"><button id="addUrlPatternRule" type="button">添加通配规则</button><button id="refreshRuleManager" type="button">刷新规则</button></div>
+      <p class="note">通配规则忽略 http/https、?参数和 #锚点；* 可匹配任意一段内容。优先级：本次网页 → 当前网页 → 通配规则 → 当前网站 → 全局设置。</p>
+
+      <div id="ruleManagerSummary" class="note">规则：正在读取…</div>
+      <div id="ruleManagerList" class="rule-list"></div>
+    </section>
+
     <section>
       <h2>术语表 / 固定翻译</h2>
       <label class="check-row"><input id="glossaryEnabled" type="checkbox"><span>启用术语表</span></label>
