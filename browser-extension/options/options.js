@@ -7,7 +7,8 @@ const LOCAL_DEFAULTS = {
   azureKey: "",
   requestTimeoutMs: 15000,
   maxRetries: 3,
-  cacheMaxEntries: 30000,
+  cacheMaxEntries: 10000,
+  cacheMaxBytes: 52428800,
   cacheTtlDays: 30,
   glossaryEnabled: true,
   glossaryCaseSensitive: false,
@@ -20,7 +21,7 @@ const SYNC_BACKUP_KEYS = [
 ];
 const LOCAL_BACKUP_KEYS = [
   "translationProvider", "fallbackGoogle", "azureEndpoint", "azureRegion", "requestTimeoutMs", "maxRetries",
-  "cacheMaxEntries", "cacheTtlDays", "glossaryEnabled", "glossaryCaseSensitive", "glossaryEntries",
+  "cacheMaxEntries", "cacheMaxBytes", "cacheTtlDays", "glossaryEnabled", "glossaryCaseSensitive", "glossaryEntries",
   "siteExclusionsV1", "siteInputLanguagesV1"
 ];
 const BACKUP_SCHEMA = "floating-translator-settings";
@@ -102,7 +103,8 @@ async function load() {
   $("azureKey").placeholder = local.azureKey ? "已保存（留空表示不修改）" : "请输入 Azure Translator Key";
   $("requestTimeoutMs").value = String(local.requestTimeoutMs || 15000);
   $("maxRetries").value = String(local.maxRetries ?? 3);
-  $("cacheMaxEntries").value = String(local.cacheMaxEntries || 30000);
+  $("cacheMaxEntries").value = String(local.cacheMaxEntries || 10000);
+  $("cacheMaxMb").value = String(Math.max(5, Math.round(Number(local.cacheMaxBytes || 52428800) / 1048576)));
   $("cacheTtlDays").value = String(local.cacheTtlDays ?? 30);
   $("glossaryEnabled").checked = local.glossaryEnabled !== false;
   $("glossaryCaseSensitive").checked = Boolean(local.glossaryCaseSensitive);
@@ -125,7 +127,8 @@ async function save({ showStatus = true, reload = true } = {}) {
     azureRegion: $("azureRegion").value.trim(),
     requestTimeoutMs: Math.max(3000, Math.min(45000, Number($("requestTimeoutMs").value) || 15000)),
     maxRetries: Math.max(0, Math.min(5, Number($("maxRetries").value) || 0)),
-    cacheMaxEntries: Math.max(1000, Math.min(200000, Number($("cacheMaxEntries").value) || 30000)),
+    cacheMaxEntries: Math.max(1000, Math.min(200000, Number($("cacheMaxEntries").value) || 10000)),
+    cacheMaxBytes: Math.max(5, Math.min(500, Number($("cacheMaxMb").value) || 50)) * 1048576,
     cacheTtlDays: Math.max(0, Math.min(3650, Number($("cacheTtlDays").value) || 0)),
     glossaryEnabled: $("glossaryEnabled").checked,
     glossaryCaseSensitive: $("glossaryCaseSensitive").checked,
@@ -181,7 +184,8 @@ async function refreshCacheStats() {
     $("cacheStats").textContent = `缓存统计：读取失败${response?.error ? `（${response.error}）` : ""}`;
     return;
   }
-  $("cacheStats").textContent = `缓存统计：${Number(response.entries || 0).toLocaleString()} 条译文缓存`;
+  const mb = Number(response.bytes || 0) / 1048576;
+  $("cacheStats").textContent = `缓存统计：${Number(response.entries || 0).toLocaleString()} 条 · ${mb.toFixed(1)} MB`;
 }
 
 function formatUsageBucket(bucket = {}) {
