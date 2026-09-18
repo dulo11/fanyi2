@@ -195,7 +195,12 @@ async function sendPageBridgeMessage(message) {
   if (!currentHost || !globalThis.FTPageBridge) return null;
   const type = String(message?.type || "");
   if (type === "FT_GET_PAGE_STATE") {
-    return await globalThis.FTPageBridge.readPageState(currentHost, 12000);
+    for (let i = 0; i < 12; i++) {
+      const state = await globalThis.FTPageBridge.readPageState(currentHost, 12000);
+      if (state) return state;
+      await delay(80);
+    }
+    return null;
   }
   if (type === "FT_REFRESH_SETTINGS") return { ok: true };
 
@@ -257,8 +262,16 @@ async function sendToPage(message) {
   } catch (error) {
     const serviceWorker = chrome.runtime.getManifest?.()?.background?.service_worker || "";
     if (serviceWorker !== "background/main.js") {
-      pageError = String(error?.message || error || "网页脚本未连接");
-      setInjectionStatus(`页面脚本：未连接 · ${pageError}`);
+      const type = String(message?.type || "");
+      if (type === "FT_GET_PAGE_STATE") {
+        pageError = "等待网页脚本状态，请刷新当前网页一次";
+        setInjectionStatus(`页面脚本：${pageError}`);
+      } else if (/EXCLUSION/.test(type)) {
+        setInjectionStatus("页面脚本：排除区域读取暂不可用");
+      } else {
+        pageError = String(error?.message || error || "网页脚本未连接");
+        setInjectionStatus(`页面脚本：未连接 · ${pageError}`);
+      }
       return null;
     }
     try {
