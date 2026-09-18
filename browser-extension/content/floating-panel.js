@@ -46,6 +46,7 @@
       .toggle{display:flex;align-items:center;gap:9px;font-size:14px;margin:9px 1px}.toggle input{width:18px;height:18px}
       .row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:9px 0}.field{display:flex;flex-direction:column;gap:5px;font-size:11px;color:#666}.field select{width:100%;height:38px;border:1px solid #d7d7df;border-radius:11px;background:#fff;color:#202124;padding:0 8px;font-size:13px}
       .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.actions button,.full{min-height:39px;border:1px solid #d5d3e5;border-radius:12px;background:#fff;color:#29282f;font-weight:650;font-size:13px;padding:7px;touch-action:manipulation}.actions button.primary{background:#6750e8;color:#fff;border-color:#6750e8}.actions button.warn{color:#8d2932}.full{width:100%;margin-top:8px;background:#f1efff;color:#4d37c8}
+      #panel button,#panel input,#panel select{pointer-events:auto;touch-action:manipulation}
       .route{font-size:11px;color:#777;margin-top:9px;text-align:center}.muted{opacity:.55}
       @media (prefers-color-scheme:dark){#panel{background:rgba(31,31,36,.98);color:#f3f3f7;border-color:#494950}.status{background:#2b2b31;color:#c7c7cf}.field{color:#aaa}.field select,.actions button{background:#29292f;color:#f1f1f4;border-color:#4a4a54}.close{background:#383840;color:#eee}.full{background:#34304a;color:#cfc6ff}.route{color:#aaa}}
     </style>
@@ -144,8 +145,12 @@
       const runtime = r?.diagnostics?.lastRuntime;
       const pool = r?.diagnostics?.providerPoolLastRoute;
       const actual = pool?.provider || runtime?.actualRoute;
+      const configured = r?.diagnostics?.provider;
+      const fallback = r?.diagnostics?.fallbackGoogle !== false;
+      const visibleRoute = actual || configured || (fallback ? "google-web" : "");
       const credential = pool?.credentialLabel ? ` · ${pool.credentialLabel}` : (pool?.credentialName ? ` · ${pool.credentialName}` : "");
-      $("route").textContent = `翻译引擎：${routeLabel(actual)}${credential}`;
+      const pending = !actual && visibleRoute ? " · 等待首次请求" : "";
+      $("route").textContent = `翻译引擎：${routeLabel(visibleRoute)}${credential}${pending}`;
     } catch {
       $("route").textContent = "翻译引擎：后台未响应，点此设置";
     } finally { routeBusy = false; }
@@ -187,7 +192,9 @@
 
   function togglePanel(force) {
     opened = typeof force === "boolean" ? force : !opened;
-    host.style.pointerEvents = opened ? "auto" : "none";
+    // 全屏 host 始终保持 click-through；只让悬浮球和面板本身接收触摸。
+    // Quetta/Android Chromium 在 host=auto 时会把整个视口变成透明点击层，导致小窗打开后其它控件像“卡死”。
+    host.style.pointerEvents = "none";
     panel.classList.toggle("open", opened);
     panel.style.display = opened ? "block" : "none";
     fab.setAttribute("aria-expanded", opened ? "true" : "false");
