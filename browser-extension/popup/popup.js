@@ -187,18 +187,83 @@ async function repairPage() {
   }
 }
 
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function sendPageBridgeMessage(message) {
+  if (!currentHost || !globalThis.FTPageBridge) return null;
+  const type = String(message?.type || "");
+  if (type === "FT_GET_PAGE_STATE") {
+    return await globalThis.FTPageBridge.readPageState(currentHost, 12000);
+  }
+  if (type === "FT_REFRESH_SETTINGS") return { ok: true };
+
+  const actionMap = {
+    FT_SET_PAUSED: "set-paused",
+    FT_TRANSLATE_NOW: "translate-now",
+    FT_RESCAN_PAGE: "rescan",
+    FT_RESTORE_PAGE: "restore"
+  };
+  const action = actionMap[type];
+  if (!action) return null;
+
+  const id = await globalThis.FTPageBridge.sendPageCommand(currentHost, action, {
+    paused: Boolean(message?.paused)
+  });
+  for (let i = 0; i < 18; i++) {
+    await delay(70);
+    const state = await globalThis.FTPageBridge.readPageState(currentHost, 12000);
+    if (state?.lastCommandId === id) return state;
+  }
+  return await globalThis.FTPageBridge.readPageState(currentHost, 12000);
+}
+
+async function tabsMessageWithTimeout(message, timeoutMs = 1500) {
+  if (!activeTab?.id) return null;
+  let task;
+  try {
+    task = chrome.tabs.sendMessage(activeTab.id, message, { frameId: 0 });
+  } catch (error) {
+    throw error;
+  }
+  if (!task || typeof task.then !== "function") return task || null;
+  return await Promise.race([
+    task,
+    delay(timeoutMs).then(() => { throw new Error("网页消息响应超时"); })
+  ]);
+}
+
 async function sendToPage(message) {
   if (!activeTab?.id) return null;
+
   try {
-    const response = await chrome.tabs.sendMessage(activeTab.id, message, { frameId: 0 });
+    const bridged = await sendPageBridgeMessage(message);
+    if (bridged) {
+      pageError = "";
+      setInjectionStatus("页面脚本：已连接");
+      return bridged;
+    }
+  } catch (error) {
+    pageError = String(error?.message || error);
+  }
+
+  try {
+    const response = await tabsMessageWithTimeout(message, 1500);
     if (!response) throw new Error("网页脚本没有响应");
     pageError = "";
     setInjectionStatus("页面脚本：已连接");
     return response;
   } catch (error) {
+    const serviceWorker = chrome.runtime.getManifest?.()?.background?.service_worker || "";
+    if (serviceWorker !== "background/main.js") {
+      pageError = String(error?.message || error || "网页脚本未连接");
+      setInjectionStatus(`页面脚本：未连接 · ${pageError}`);
+      return null;
+    }
     try {
       await repairPage();
-      const response = await chrome.tabs.sendMessage(activeTab.id, message, { frameId: 0 });
+      const response = await tabsMessageWithTimeout(message, 1800);
       if (!response) throw new Error("网页脚本没有响应，请刷新网页");
       pageError = "";
       setInjectionStatus("页面脚本：已连接（自动修复成功）");
