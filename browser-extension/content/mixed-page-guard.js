@@ -87,11 +87,9 @@
 
     lastForcedUrl = location.href;
     try {
-      const response = await chrome.runtime.sendMessage({
-        type: "FT_FORCE_PAGE_TRANSLATION",
-        reason: "mixed-language-page"
-      });
-      if (!response?.ok) lastForcedUrl = "";
+      window.dispatchEvent(new CustomEvent("ft-floating-command", {
+        detail: { action: "translate-now", reason: "mixed-language-page" }
+      }));
     } catch {
       lastForcedUrl = "";
     }
