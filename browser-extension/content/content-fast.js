@@ -50,6 +50,7 @@
     retried: 0,
     protectedRestores: 0,
     lastError: "",
+    lastCommandId: "",
     scanTokens: new Set()
   };
 
@@ -57,6 +58,9 @@
   const exclusions = () => globalThis.FTSiteExclusions;
 
   function sendRuntime(message, timeoutMs = 60000) {
+    if (/^FT_TRANSLATE/.test(String(message?.type || "")) && globalThis.FTStorageRPC?.send) {
+      return globalThis.FTStorageRPC.send(message, timeoutMs);
+    }
     if (globalThis.FTMessaging?.runtimeSend) return globalThis.FTMessaging.runtimeSend(message, timeoutMs);
     return chrome.runtime.sendMessage(message);
   }
@@ -366,6 +370,7 @@
       console.warn("[FloatingTranslator]", error);
     } finally {
       state.processing = false;
+      publishPageStateSoon(20);
       if (state.active && !state.paused && (state.queue.size || state.urgentQueue.size) && !state.retryTimer) scheduleFlush(35);
     }
   }
@@ -559,8 +564,41 @@
       retried: state.retried,
       protectedRestores: state.protectedRestores,
       lastError: state.lastError,
+      lastCommandId: state.lastCommandId,
       performanceMode: "page-first"
     };
+  }
+
+  let pageStatePublishTimer = null;
+  function publishPageStateSoon(delay = 0) {
+    if (!globalThis.FTPageBridge?.publishPageState || !location.hostname) return;
+    clearTimeout(pageStatePublishTimer);
+    pageStatePublishTimer = setTimeout(() => {
+      pageStatePublishTimer = null;
+      globalThis.FTPageBridge.publishPageState(location.hostname, {
+        ...pageStateSnapshot(),
+        href: location.href
+      }).catch(() => {});
+    }, Math.max(0, delay));
+  }
+
+  function performPageAction(action, payload = {}) {
+    if (action === "pause-toggle") setPaused(!state.paused);
+    else if (action === "set-paused") setPaused(Boolean(payload.paused));
+    else if (action === "translate-now") {
+      restorePage();
+      state.paused = false;
+      state.active = true;
+      queueScanRoot(document.body);
+    } else if (action === "rescan") {
+      handleRouteRescan();
+    } else if (action === "restore") {
+      state.active = false;
+      state.paused = false;
+      restorePage();
+    } else if (action !== "get-state") {
+      throw new Error(`未知快捷操作：${action}`);
+    }
   }
 
   // ZIP 快捷窗直接控制当前页面，不再经后台转发回同一标签页。
@@ -570,21 +608,8 @@
     const detail = event.detail || {};
     const action = String(detail.action || "get-state");
     try {
-      if (action === "pause-toggle") setPaused(!state.paused);
-      else if (action === "translate-now") {
-        restorePage();
-        state.paused = false;
-        state.active = true;
-        queueScanRoot(document.body);
-      } else if (action === "rescan") {
-        handleRouteRescan();
-      } else if (action === "restore") {
-        state.active = false;
-        state.paused = false;
-        restorePage();
-      } else if (action !== "get-state") {
-        throw new Error(`未知快捷操作：${action}`);
-      }
+      performPageAction(action, detail.payload || {});
+      publishPageStateSoon(0);
 
       window.dispatchEvent(new CustomEvent("ft-floating-state", {
         detail: { ...pageStateSnapshot(), requestId: detail.requestId, bridgeOk: true }
@@ -643,7 +668,23 @@
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "sync" && Object.keys(changes).some(key => key in DEFAULTS)) loadSettings();
+    if (area === "sync" && Object.keys(changes).some(key => key in DEFAULTS)) {
+      loadSettings().then(() => publishPageStateSoon(0)).catch(() => {});
+      return;
+    }
+    if (area !== "local" || !globalThis.FTPageBridge?.pageCommandKey) return;
+    const commandKey = globalThis.FTPageBridge.pageCommandKey(location.hostname);
+    const command = changes[commandKey]?.newValue;
+    if (!command?.id) return;
+    try {
+      performPageAction(String(command.action || "get-state"), command.payload || {});
+      state.lastCommandId = String(command.id);
+      publishPageStateSoon(0);
+    } catch (error) {
+      state.lastError = String(error?.message || error);
+      state.lastCommandId = String(command.id);
+      publishPageStateSoon(0);
+    }
   });
   document.addEventListener("keydown", translateFocusedInput, true);
   window.addEventListener("ft-route-change", handleRouteRescan, true);
@@ -672,6 +713,7 @@
     await waitForPageLoadBudget();
     startObserver();
     if (state.active && !state.paused) queueScanRoot(document.body);
+    publishPageStateSoon(0);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
