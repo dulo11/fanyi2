@@ -48,11 +48,10 @@ shutil.copy2(ROOT / "compat" / "browser-api-v12.js", out / "compat" / "browser-a
 
 popup_html_path = out / "popup" / "popup.html"
 popup_html = popup_html_path.read_text(encoding="utf-8")
-# ZIP 保留“网页访问权限/重新注入”卡片；Quetta 侧载包有时不会自动注入 content_scripts。
-popup_html = re.sub(r'\n\s*<section class="card" id="updateCard">.*?</section>\n', "\n", popup_html, flags=re.S)
+# ZIP 保留“网页访问权限/重新注入”和 Stable/Beta 更新提示卡片。
+# ZIP 不走浏览器自托管 CRX 更新，但 update-controls.js 会通过 GitHub Releases 检查并打开下载页。
 popup_html = popup_html.replace('  <script src="../shared/messaging-compat.js"></script>\n', "")
 popup_html = popup_html.replace('  <script src="../shared/storage-rpc-client.js"></script>\n', "")
-popup_html = popup_html.replace('  <script src="update-controls.js"></script>\n', "")
 popup_html = popup_html.replace("固定签名版继续保护已经翻好的文字；", "ZIP 版继续保护已经翻好的文字；")
 popup_html_path.write_text(popup_html, encoding="utf-8")
 
@@ -108,8 +107,8 @@ assert block["match_about_blank"] is True
 assert "siteAccessCard" in popup_html
 assert "messaging-compat.js" not in popup_html
 assert "storage-rpc-client.js" not in popup_html
-assert "update-controls.js" not in popup_html
-assert "updateCard" not in popup_html
+assert "update-controls.js" in popup_html
+assert "updateCard" in popup_html
 assert (out / "compat" / "browser-api.js").exists()
 assert (out / "content" / "content.js").exists()
 assert (out / "content" / "attribute-translator.js").exists()
