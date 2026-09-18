@@ -48,7 +48,7 @@ shutil.copy2(ROOT / "compat" / "browser-api-v12.js", out / "compat" / "browser-a
 
 popup_html_path = out / "popup" / "popup.html"
 popup_html = popup_html_path.read_text(encoding="utf-8")
-popup_html = re.sub(r'\n\s*<section class="card" id="siteAccessCard">.*?</section>\n', "\n", popup_html, flags=re.S)
+# ZIP 保留“网页访问权限/重新注入”卡片；Quetta 侧载包有时不会自动注入 content_scripts。
 popup_html = re.sub(r'\n\s*<section class="card" id="updateCard">.*?</section>\n', "\n", popup_html, flags=re.S)
 popup_html = popup_html.replace('  <script src="../shared/messaging-compat.js"></script>\n', "")
 popup_html = popup_html.replace('  <script src="../shared/storage-rpc-client.js"></script>\n', "")
@@ -56,10 +56,9 @@ popup_html = popup_html.replace('  <script src="update-controls.js"></script>\n'
 popup_html = popup_html.replace("固定签名版继续保护已经翻好的文字；", "ZIP 版继续保护已经翻好的文字；")
 popup_html_path.write_text(popup_html, encoding="utf-8")
 
-# Popup 直接恢复 v1.2 已经在 Quetta 使用过的 tabs.sendMessage/runtime.sendMessage 逻辑，
-# 不再经过 storage RPC、超时桥、后台补注入。
+# Popup 使用当前诊断/授权 UI，但翻译页面本身仍走 v1.2 原生消息核心。
+# storage RPC 和 callback 包装脚本已从 ZIP 移除；连接失败时允许 main-zip.js 手动补注入。
 popup_js_path = out / "popup" / "popup.js"
-shutil.copy2(ROOT / "popup" / "popup-v12.js", popup_js_path)
 
 # options 保留 v1.2 Chromium 兼容层（在 Chromium 中为原生 API，不做 callback 包装）。
 options_path = out / "options" / "options.html"
@@ -74,7 +73,6 @@ for path in [
         shutil.rmtree(path)
 
 for path in [
-    out / "background" / "page-injector.js",
     out / "background" / "main.js",
     out / "content" / "content-fast.js",
     out / "content" / "attribute-translator-lite.js",
@@ -107,7 +105,7 @@ assert "shared/messaging-compat.js" not in block["js"]
 assert "shared/storage-rpc-client.js" not in block["js"]
 assert block["all_frames"] is True
 assert block["match_about_blank"] is True
-assert "siteAccessCard" not in popup_html
+assert "siteAccessCard" in popup_html
 assert "messaging-compat.js" not in popup_html
 assert "storage-rpc-client.js" not in popup_html
 assert "update-controls.js" not in popup_html
@@ -115,7 +113,7 @@ assert "updateCard" not in popup_html
 assert (out / "compat" / "browser-api.js").exists()
 assert (out / "content" / "content.js").exists()
 assert (out / "content" / "attribute-translator.js").exists()
-assert not (out / "background" / "page-injector.js").exists()
+assert (out / "background" / "page-injector.js").exists()
 
 for rel in block["js"] + block.get("css", []):
     if not (out / rel).is_file():
