@@ -28,6 +28,23 @@
 
   const $ = id => document.getElementById(id);
 
+  async function safeRuntimeMessage(message) {
+    try {
+      if (!chrome.runtime?.id) throw new Error("Extension context invalidated");
+      const task = chrome.runtime.sendMessage(message);
+      if (!task || typeof task.then !== "function") return task;
+      return await task;
+    } catch (error) {
+      const text = String(error?.message || error || "扩展通信失败");
+      if (/Extension context invalidated|context invalidated/i.test(text)) {
+        setTimeout(() => {
+          try { location.reload(); } catch {}
+        }, 250);
+      }
+      return { ok: false, error: text };
+    }
+  }
+
   function newId(provider) {
     return `${provider}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -230,7 +247,7 @@
       baiduCredentials: state.baiduCredentials,
       aliyunCredentials: state.aliyunCredentials
     });
-    await chrome.runtime.sendMessage({ type: "FT_PROVIDER_POOL_RESET_HEALTH" }).catch(() => null);
+    await safeRuntimeMessage({ type: "FT_PROVIDER_POOL_RESET_HEALTH" });
     $("providerPoolSaveStatus").textContent = "多引擎配置已保存";
     setTimeout(() => { $("providerPoolSaveStatus").textContent = ""; }, 3000);
     await refreshPoolStatus();
@@ -249,7 +266,7 @@
   async function refreshPoolStatus() {
     const node = $("providerPoolStatus");
     if (!node) return;
-    const response = await chrome.runtime.sendMessage({ type: "FT_PROVIDER_POOL_STATUS" }).catch(error => ({ ok: false, error: error?.message || error }));
+    const response = await safeRuntimeMessage({ type: "FT_PROVIDER_POOL_STATUS" });
     if (!response?.ok) {
       node.textContent = `凭据池状态：读取失败${response?.error ? ` · ${response.error}` : ""}`;
       return;
@@ -278,7 +295,7 @@
     $("saveProviderPool")?.addEventListener("click", () => savePool().catch(error => { $("providerPoolSaveStatus").textContent = `保存失败：${error?.message || error}`; }));
     $("refreshProviderPoolStatus")?.addEventListener("click", () => refreshPoolStatus());
     $("resetProviderPoolHealth")?.addEventListener("click", async () => {
-      await chrome.runtime.sendMessage({ type: "FT_PROVIDER_POOL_RESET_HEALTH" });
+      await safeRuntimeMessage({ type: "FT_PROVIDER_POOL_RESET_HEALTH" });
       await refreshPoolStatus();
     });
     loadPool().catch(error => { $("providerPoolStatus").textContent = `加载失败：${error?.message || error}`; });
