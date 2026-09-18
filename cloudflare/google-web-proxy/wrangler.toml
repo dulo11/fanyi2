@@ -1,0 +1,7 @@
+name = "fanyi-google-web-proxy"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# 不要把真实 Token 写进这个文件。
+# 部署后执行：
+# wrangler secret put FT_PROXY_TOKEN
