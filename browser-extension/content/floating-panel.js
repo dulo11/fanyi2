@@ -23,7 +23,6 @@
   let drag = null;
   let stateRequest = 0;
   let suppressClickUntil = 0;
-  let lastTapAt = 0;
   let routeBusy = false;
 
   // Quetta 对“全屏透明 host + Shadow DOM 子元素”的命中测试不稳定。
@@ -218,9 +217,6 @@
   }
 
   function tapFab() {
-    const now = Date.now();
-    if (now - lastTapAt < 300) return;
-    lastTapAt = now;
     togglePanel();
   }
 
