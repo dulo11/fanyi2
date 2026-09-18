@@ -26,7 +26,8 @@ const optionsJs = read('options/options.js');
 assert.match(optionsJs, /testGoogleWebProxy/);
 assert.match(optionsJs, /googleWebProxyUrl/);
 assert.match(optionsJs, /googleWebProxyToken/);
-assert.match(optionsJs, /X-FT-Token/);
+assert.match(optionsJs, /chrome\.runtime\.sendMessage/);
+assert.match(optionsJs, /provider:\s*["']google-web["']/);
 assert.match(optionsJs, /LOCAL_BACKUP_KEYS/);
 assert.doesNotMatch(
   optionsJs.match(/const LOCAL_BACKUP_KEYS = \[[\s\S]*?\];/)?.[0] || '',
