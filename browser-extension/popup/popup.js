@@ -6,6 +6,7 @@ const DEFAULTS = {
   displayMode: "translated",
   siteRules: {},
   pageRules: {},
+  urlPatternRules: {},
   siteTranslationProfiles: {},
   skipTargetLanguage: true,
   chatMode: true,
@@ -34,6 +35,7 @@ let currentHost = "";
 let settings = { ...DEFAULTS };
 let localSettings = { ...LOCAL_DEFAULTS };
 let pagePaused = false;
+let tempPageSkipped = false;
 let repairing = null;
 let repairAttempted = false;
 let pageError = "";
@@ -400,6 +402,10 @@ function render() {
     ? `当前网页：${pageKey.replace(/^https?:\/\//, "")}`
     : "当前网页规则：此页面不支持";
   $("pauseResume").textContent = pagePaused ? "继续翻译" : "暂停翻译";
+  if ($("tempPageSkip")) {
+    $("tempPageSkip").textContent = tempPageSkipped ? "恢复本次网页翻译" : "本次网页不翻译";
+    $("tempPageSkip").disabled = !currentHost;
+  }
   $("swapInputLang").disabled = (settings.inputSourceLang || "auto") === "auto";
   $("swapInputLang").title = $("swapInputLang").disabled ? "先把输入语言改成具体语言后才能交换" : "交换输入与发送语言";
   $("pickExclusion").disabled = !currentHost;
@@ -445,7 +451,8 @@ async function refreshPageState() {
     return;
   }
   pagePaused = Boolean(response.paused);
-  const pieces = [pagePaused ? "已暂停" : (response.active ? "持续翻译中" : "未翻译")];
+  tempPageSkipped = Boolean(response.temporarySkipped);
+  const pieces = [tempPageSkipped ? "本次网页已跳过" : (pagePaused ? "已暂停" : (response.active ? "持续翻译中" : "未翻译"))];
   if (response.pageLang) pieces.push(response.pageLang);
   if (response.processing) pieces.push("处理中");
   if (response.queued) pieces.push(`待翻译 ${response.queued}`);
@@ -455,6 +462,15 @@ async function refreshPageState() {
   if (response.failed) pieces.push(`失败累计 ${response.failed}`);
   if (response.failedQueued) pieces.push(`待手动重试 ${response.failedQueued}`);
   if (response.siteProfile) pieces.push("网站独立配置");
+  if (response.patternRule?.action && response.patternRule.action !== "default") {
+    pieces.push(`通配${response.patternRule.action === "never" ? "不翻译" : "翻译"}`);
+  }
+  if ($("wildcardRuleStatus")) {
+    const matched = response.patternRule;
+    $("wildcardRuleStatus").textContent = matched?.action && matched.action !== "default"
+      ? `通配规则：${matched.pattern} → ${matched.action === "never" ? "不翻译" : "始终翻译"}`
+      : "通配规则：当前未匹配";
+  }
   if (settings.chatMode && settings.inputPreview) pieces.push("聊天输入预览开");
   if ($("retryFailed")) $("retryFailed").disabled = !Number(response.failedQueued || 0);
   $("pageState").textContent = pieces.join(" · ");
@@ -587,6 +603,13 @@ function bindControls() {
       .finally(() => { $("runSelfCheck").disabled = false; });
   });
 
+  $("tempPageSkip")?.addEventListener("click", async () => {
+    const next = !tempPageSkipped;
+    $("pageState").textContent = next ? "正在仅对本次网页停止翻译…" : "正在恢复本次网页翻译…";
+    const response = await sendToPage({ type: "FT_SET_TEMP_PAGE_SKIP", enabled: next });
+    if (response?.ok) tempPageSkipped = Boolean(response.temporarySkipped);
+    setTimeout(refreshPageState, 120);
+  });
   $("saveSiteProfile")?.addEventListener("click", () => saveCurrentSiteProfile().catch(error => {
     $("selfCheckStatus").textContent = `网站配置保存失败：${error?.message || error}`;
   }));
