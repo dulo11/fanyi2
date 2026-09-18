@@ -26,8 +26,10 @@
       <div class="actions">
         <button id="grantSiteAccess" class="primary">授权网页翻译</button>
         <button id="retryInjection">重新注入当前网页</button>
+        <button id="runSelfCheck">一键自检并修复</button>
       </div>
-      <div class="host">如果 CRX 安装后浏览器没有自动授予网站访问权限，可在这里主动请求；授权成功后会立即重新注入当前网页。</div>
+      <div id="selfCheckStatus" class="host">自检：尚未运行</div>
+      <div class="host">自检会检查后台、网页权限、页面脚本、翻译引擎和译文返回链路；发现页面脚本缺失时会自动补注入。</div>
     </section>
 
     <section class="card">
@@ -71,7 +73,24 @@
       <div id="host" class="host"></div>
       <div id="exclusionCount" class="host">排除区域：正在读取…</div>
       <div id="runtimeRoute" class="host">最近翻译路径：正在读取…</div>
-      <div class="actions"><button id="pickExclusion">选择不翻译区域</button><button id="clearExclusions">清除此网站排除</button></div>
+      <div id="routeHistory" class="host">引擎切换：暂无记录</div>
+
+      <label class="check-row"><input id="siteProfileEnabled" type="checkbox"><span>当前网站使用独立翻译配置</span></label>
+      <div class="grid">
+        <label><span>独立源语言</span><select id="siteProfileSource"></select></label>
+        <label><span>独立目标语言</span><select id="siteProfileTarget"></select></label>
+      </div>
+      <div class="grid">
+        <label><span>独立引擎</span><select id="siteProfileProvider"><option value="">跟随全局/自动池</option><option value="azure">Azure</option><option value="baidu">百度</option><option value="aliyun">阿里云</option><option value="google-web">Google Web</option></select></label>
+        <label><span>显示方式</span><select id="siteProfileDisplay"><option value="translated">仅译文</option><option value="bilingual">原文 + 译文</option></select></label>
+      </div>
+      <label class="check-row"><input id="siteProfileAuto" type="checkbox"><span>此网站自动持续翻译</span></label>
+      <div class="actions">
+        <button id="saveSiteProfile">保存当前网站配置</button>
+        <button id="clearSiteProfile">清除独立配置</button>
+        <button id="pickExclusion">选择不翻译区域</button>
+        <button id="clearExclusions">清除此网站排除</button>
+      </div>
       <div class="host">点“选择不翻译区域”后回到网页，再点要排除的区域。代码块、编辑器、用户名区等以后不会自动翻译；Esc 可取消选择。</div>
     </section>
 
@@ -79,18 +98,21 @@
       <button id="pauseResume" class="primary">暂停翻译</button>
       <button id="translateNow">重新翻译整页</button>
       <button id="rescanPage">补扫遗漏内容</button>
+      <button id="retryFailed">仅重试失败内容</button>
       <button id="restorePage">恢复原文</button>
     </div>
 
     <section class="card" id="updateCard">
       <strong>扩展更新</strong>
       <div id="extensionVersion" class="host">当前版本：读取中…</div>
-      <div id="updateStatus" class="host">固定扩展 ID：hlfnagdelcpfdbpdeackdjelemaaoban</div>
+      <label><span>更新通道</span><select id="releaseChannel"><option value="stable">稳定版 Stable</option><option value="beta">测试版 Beta</option></select></label>
+      <div id="updateStatus" class="host">正在读取更新通道…</div>
       <div class="actions">
         <button id="checkExtensionUpdate">检查更新</button>
+        <button id="openReleasePage" hidden>打开新版下载页</button>
         <button id="applyExtensionUpdate" hidden>应用已下载更新</button>
       </div>
-      <div class="host">安装固定签名 CRX 后，支持标准 Chromium 更新机制的浏览器会按 update_url 自动检查；这里也可以手动请求检查。</div>
+      <div class="host">稳定版只提示正式 Release；Beta 会同时提示预发布版。ZIP 版发现更新后打开下载页，固定签名 CRX 仍可调用浏览器标准更新机制。</div>
     </section>
 
     <div class="tip">暂停后保留当前译文和剩余队列；继续后接着跑。高级设置里可以导出/恢复配置和复制诊断信息。</div>
