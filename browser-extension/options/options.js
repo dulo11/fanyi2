@@ -21,7 +21,7 @@ const SYNC_BACKUP_KEYS = [
 ];
 const LOCAL_BACKUP_KEYS = [
   "translationProvider", "fallbackGoogle", "azureEndpoint", "azureRegion", "requestTimeoutMs", "maxRetries",
-  "cacheMaxEntries", "cacheMaxBytes", "cacheTtlDays", "glossaryEnabled", "glossaryCaseSensitive", "glossaryEntries",
+  "cacheMaxEntries", "cacheMaxBytes", "cacheTtlDays", "releaseChannel", "glossaryEnabled", "glossaryCaseSensitive", "glossaryEntries",
   "siteExclusionsV1", "siteInputLanguagesV1"
 ];
 const BACKUP_SCHEMA = "floating-translator-settings";
@@ -242,7 +242,8 @@ async function diagnosticObject() {
     userAgent: navigator.userAgent,
     diagnostics: diagnostics?.diagnostics || null,
     usage: usage?.usage || null,
-    cacheEntries: cache?.entries ?? null
+    cacheEntries: cache?.entries ?? null,
+    cacheBytes: cache?.bytes ?? null
   };
 }
 
