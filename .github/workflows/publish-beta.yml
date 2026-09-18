@@ -1,0 +1,59 @@
+name: Publish Chromium ZIP Beta
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-beta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate and build beta
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d ':space:' < browser-extension/ZIP_VERSION)"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          BUILD="$GITHUB_RUN_NUMBER"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          while IFS= read -r -d '' file; do node --check "$file"; done < <(find browser-extension -type f \( -name '*.js' -o -name '*.cjs' \) -print0)
+          for test in browser-extension/tests/*.test.cjs; do node "$test"; done
+          rm -rf build/chromium-pure-zip dist
+          mkdir -p dist
+          python browser-extension/tools/build-pure-zip.py build/chromium-pure-zip
+          (cd build/chromium-pure-zip && zip -qr "../../dist/FloatingTranslator-Chromium-v${VERSION}-beta-${BUILD}.zip" .)
+          sha256sum "dist/FloatingTranslator-Chromium-v${VERSION}-beta-${BUILD}.zip" > "dist/SHA256SUMS-v${VERSION}-beta-${BUILD}.txt"
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.meta.outputs.version }}'
+          BUILD='${{ steps.meta.outputs.build }}'
+          TAG="browser-beta-v${VERSION}-b${BUILD}"
+          ZIP="dist/FloatingTranslator-Chromium-v${VERSION}-beta-${BUILD}.zip"
+          SUM="dist/SHA256SUMS-v${VERSION}-beta-${BUILD}.txt"
+          gh release create "$TAG" "$ZIP" "$SUM" \
+            --target "$GITHUB_SHA" \
+            --title "浮译 浏览器版 v${VERSION} Beta ${BUILD}" \
+            --prerelease \
+            --notes "Beta 测试通道。正文翻译继续使用 v1.2 稳定主链；新功能先在 Beta 验证，通过后再进入 Stable。"
+
+      - name: Upload beta artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FloatingTranslator-Chromium-v${{ steps.meta.outputs.version }}-beta-${{ steps.meta.outputs.build }}
+          path: |
+            dist/FloatingTranslator-Chromium-v${{ steps.meta.outputs.version }}-beta-${{ steps.meta.outputs.build }}.zip
+            dist/SHA256SUMS-v${{ steps.meta.outputs.version }}-beta-${{ steps.meta.outputs.build }}.txt
+          if-no-files-found: error
+          retention-days: 30
