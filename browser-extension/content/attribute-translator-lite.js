@@ -35,6 +35,12 @@
   const helper = () => globalThis.FTLanguage;
   const exclusions = () => globalThis.FTSiteExclusions;
 
+  function sendTranslation(message, timeoutMs = 60000) {
+    if (globalThis.FTStorageRPC?.send) return globalThis.FTStorageRPC.send(message, timeoutMs);
+    if (globalThis.FTMessaging?.runtimeSend) return globalThis.FTMessaging.runtimeSend(message, timeoutMs);
+    return chrome.runtime.sendMessage(message);
+  }
+
   function isExcluded(element) {
     try { return Boolean(exclusions()?.isExcluded?.(element)); }
     catch { return false; }
@@ -177,7 +183,7 @@
     for (const item of items) queue.delete(queueKey(item.element, item.attr));
 
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await sendTranslation({
         type: "FT_TRANSLATE_DETAILED",
         texts: items.map(item => item.original),
         options: { sourceLang: settings.sourceLang, targetLang: settings.targetLang }
