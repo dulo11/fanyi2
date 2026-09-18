@@ -66,6 +66,12 @@
 
   const helper = () => globalThis.FTLanguage;
   const exclusions = () => globalThis.FTSiteExclusions;
+
+  function sendTranslation(message, timeoutMs = 60000) {
+    if (globalThis.FTStorageRPC?.send) return globalThis.FTStorageRPC.send(message, timeoutMs);
+    if (globalThis.FTMessaging?.runtimeSend) return globalThis.FTMessaging.runtimeSend(message, timeoutMs);
+    return chrome.runtime.sendMessage(message);
+  }
   const normalizeLang = value => helper()?.normalizeLang(value) || String(value || "").toLowerCase();
   const pageLang = () => normalizeLang(document.documentElement?.lang || "");
 
@@ -94,7 +100,7 @@
   }
 
   async function translateOne(text, sourceLang, targetLang) {
-    const response = await chrome.runtime.sendMessage({
+    const response = await sendTranslation({
       type: "FT_TRANSLATE",
       texts: [text],
       options: { sourceLang, targetLang }
@@ -408,7 +414,7 @@
     state.shadowBusy.add(root);
     try {
       const texts = nodes.map(node => node.nodeValue.trim());
-      const response = await chrome.runtime.sendMessage({
+      const response = await sendTranslation({
         type: "FT_TRANSLATE_DETAILED",
         texts,
         options: { sourceLang: state.settings.sourceLang, targetLang: state.settings.targetLang }
