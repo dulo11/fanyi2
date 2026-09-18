@@ -7,6 +7,7 @@
 
   const STATE_KEY = "translationRuntimeStateV1";
   const POOL_ROUTE_KEY = "providerPoolLastRouteV1";
+  const ROUTE_LOG_KEY = "providerRouteLogV1";
 
   async function requestedProvider(options = {}) {
     if (options?.provider) return String(options.provider);
@@ -35,6 +36,15 @@
 
   async function writeState(state) {
     try { await chrome.storage.local.set({ [STATE_KEY]: state }); } catch {}
+  }
+
+  async function appendRouteLog(entry) {
+    try {
+      const stored = await chrome.storage.local.get({ [ROUTE_LOG_KEY]: [] });
+      const log = Array.isArray(stored[ROUTE_LOG_KEY]) ? stored[ROUTE_LOG_KEY].slice(-19) : [];
+      log.push({ ...entry, at: Number(entry.at || Date.now()) });
+      await chrome.storage.local.set({ [ROUTE_LOG_KEY]: log });
+    } catch {}
   }
 
   async function recentPoolRoute(startedAt) {
@@ -77,7 +87,7 @@
         route = requested;
       }
 
-      await writeState({
+      const state = {
         ok: true,
         requestedProvider: requested,
         actualRoute: route,
@@ -90,11 +100,22 @@
         durationMs: Date.now() - startedAt,
         at: Date.now(),
         error: ""
-      });
+      };
+      await writeState(state);
+      if (!poolRoute) {
+        await appendRouteLog({
+          provider: route,
+          credentialLabel,
+          ok: true,
+          error: "",
+          durationMs: state.durationMs,
+          at: state.at
+        });
+      }
       return result;
     } catch (error) {
       const poolRoute = await recentPoolRoute(startedAt);
-      await writeState({
+      const state = {
         ok: false,
         requestedProvider: requested,
         actualRoute: poolRoute?.provider || requested,
@@ -107,7 +128,18 @@
         durationMs: Date.now() - startedAt,
         at: Date.now(),
         error: String(error?.message || error)
-      });
+      };
+      await writeState(state);
+      if (!poolRoute) {
+        await appendRouteLog({
+          provider: state.actualRoute,
+          credentialLabel: state.credentialLabel,
+          ok: false,
+          error: state.error,
+          durationMs: state.durationMs,
+          at: state.at
+        });
+      }
       throw error;
     }
   };
