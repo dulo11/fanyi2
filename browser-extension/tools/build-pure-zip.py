@@ -50,29 +50,6 @@ popup_html_path.write_text(popup_html, encoding="utf-8")
 
 popup_js_path = out / "popup" / "popup.js"
 popup_js = popup_js_path.read_text(encoding="utf-8")
-popup_js = re.sub(
-    r'async function repairPage\(\) \{.*?\n\}\n\nasync function sendToPage\(message\) \{.*?\n\}\n\nasync function loadSiteInputProfile',
-    '''async function repairPage() {
-  throw new Error("ZIP 版不使用补注入，请刷新当前网页");
-}
-
-async function sendToPage(message) {
-  if (!activeTab?.id) return null;
-  try {
-    const response = await chrome.tabs.sendMessage(activeTab.id, message);
-    if (!response) throw new Error("网页脚本没有响应");
-    pageError = "";
-    return response;
-  } catch (error) {
-    pageError = String(error?.message || error || "网页脚本未连接");
-    return null;
-  }
-}
-
-async function loadSiteInputProfile''',
-    popup_js,
-    flags=re.S,
-)
 popup_js = popup_js.replace(
     "void Promise.allSettled([refreshSiteAccess(), refreshPageState(), refreshExclusions(), refreshRuntimeRoute()]);",
     "void Promise.allSettled([refreshPageState(), refreshExclusions(), refreshRuntimeRoute()]);",
@@ -112,6 +89,8 @@ assert block["all_frames"] is False
 assert block["match_about_blank"] is False
 assert "siteAccessCard" not in popup_html
 assert "messaging-compat.js" not in popup_html
+assert "storage-rpc-client.js" in popup_html
+assert "shared/storage-rpc-client.js" in block["js"]
 assert "updateCard" not in popup_html
 assert not (out / "background" / "page-injector.js").exists()
 assert not (out / "compat" / "browser-api.js").exists()
