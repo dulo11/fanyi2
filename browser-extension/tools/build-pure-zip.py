@@ -27,7 +27,7 @@ manifest["background"]["service_worker"] = "background/main-zip.js"
 block = manifest["content_scripts"][0]
 new_js = []
 for item in block["js"]:
-    if item in ("compat/browser-api.js", "content/floating-panel-bridge.js"):
+    if item in ("compat/browser-api.js", "content/floating-panel-bridge.js", "shared/messaging-compat.js"):
         continue
     if item == "content/content.js":
         item = "content/content-fast.js"
@@ -44,6 +44,7 @@ popup_html = popup_html_path.read_text(encoding="utf-8")
 popup_html = re.sub(r'\n\s*<section class="card" id="siteAccessCard">.*?</section>\n', "\n", popup_html, flags=re.S)
 popup_html = re.sub(r'\n\s*<section class="card" id="updateCard">.*?</section>\n', "\n", popup_html, flags=re.S)
 popup_html = popup_html.replace('  <script src="../compat/browser-api.js"></script>\n', "")
+popup_html = popup_html.replace('  <script src="../shared/messaging-compat.js"></script>\n', "")
 popup_html = popup_html.replace("固定签名版继续保护已经翻好的文字；", "ZIP 版继续保护已经翻好的文字；")
 popup_html_path.write_text(popup_html, encoding="utf-8")
 
@@ -104,12 +105,13 @@ assert manifest["background"]["service_worker"] == "background/main-zip.js"
 assert "update_url" not in manifest
 assert "compat/browser-api.js" not in block["js"]
 assert "content/floating-panel-bridge.js" not in block["js"]
-assert "shared/messaging-compat.js" in block["js"]
+assert "shared/messaging-compat.js" not in block["js"]
 assert "content/content-fast.js" in block["js"]
 assert "content/attribute-translator-lite.js" in block["js"]
 assert block["all_frames"] is False
 assert block["match_about_blank"] is False
 assert "siteAccessCard" not in popup_html
+assert "messaging-compat.js" not in popup_html
 assert "updateCard" not in popup_html
 assert not (out / "background" / "page-injector.js").exists()
 assert not (out / "compat" / "browser-api.js").exists()
