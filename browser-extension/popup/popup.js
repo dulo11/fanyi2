@@ -5,6 +5,7 @@ const DEFAULTS = {
   targetLang: "zh-CN",
   displayMode: "translated",
   siteRules: {},
+  siteTranslationProfiles: {},
   skipTargetLanguage: true,
   chatMode: true,
   inputPreview: true,
@@ -13,7 +14,8 @@ const DEFAULTS = {
 };
 
 const LOCAL_DEFAULTS = {
-  fallbackGoogle: true
+  fallbackGoogle: true,
+  releaseChannel: "stable"
 };
 
 const SITE_INPUT_KEY = "siteInputLanguagesV1";
@@ -53,6 +55,8 @@ function populateLanguages() {
   appendLanguageOptions($("targetLang"), false);
   appendLanguageOptions($("inputSourceLang"), true);
   appendLanguageOptions($("inputTargetLang"), false);
+  appendLanguageOptions($("siteProfileSource"), true);
+  appendLanguageOptions($("siteProfileTarget"), false);
 }
 
 async function getActiveTab() {
@@ -311,17 +315,26 @@ async function saveSiteInputProfile(sourceLang, targetLang) {
 
 function routeLabel(route) {
   if (route === "azure") return "Azure";
+  if (route === "baidu") return "百度";
+  if (route === "aliyun") return "阿里云";
   if (route === "google-web") return "Google Web";
   if (route === "google-fallback") return "Google 回退";
   if (route === "cache") return "缓存";
   return route || "暂无";
 }
 
+function currentSiteProfile() {
+  if (!currentHost) return null;
+  const profile = settings.siteTranslationProfiles?.[currentHost];
+  return profile && profile.enabled !== false ? profile : null;
+}
+
 async function refreshRuntimeRoute() {
   try {
     const local = await chrome.storage.local.get({
       translationRuntimeStateV1: null,
-      providerPoolLastRouteV1: null
+      providerPoolLastRouteV1: null,
+      providerRouteLogV1: []
     });
     const runtime = local.translationRuntimeStateV1;
     const pool = local.providerPoolLastRouteV1;
@@ -329,15 +342,26 @@ async function refreshRuntimeRoute() {
     const at = Number(pool?.at || runtime?.at || 0);
     if (!runtime && !pool) {
       $("runtimeRoute").textContent = "最近翻译路径：暂无记录";
-      return;
+    } else {
+      const when = at ? new Date(at).toLocaleTimeString() : "-";
+      const failed = pool?.ok === false || runtime?.ok === false;
+      const error = pool?.error || runtime?.error || "";
+      const suffix = failed ? ` · 失败：${error || "未知错误"}` : (runtime ? ` · ${runtime.durationMs || 0}ms` : "");
+      $("runtimeRoute").textContent = `最近翻译路径：${routeLabel(route)} · ${when}${suffix}`;
     }
-    const when = at ? new Date(at).toLocaleTimeString() : "-";
-    const failed = pool?.ok === false || runtime?.ok === false;
-    const error = pool?.error || runtime?.error || "";
-    const suffix = failed ? ` · 失败：${error || "未知错误"}` : (runtime ? ` · ${runtime.durationMs || 0}ms` : "");
-    $("runtimeRoute").textContent = `最近翻译路径：${routeLabel(route)} · ${when}${suffix}`;
+
+    const history = Array.isArray(local.providerRouteLogV1) ? local.providerRouteLogV1.slice(-4).reverse() : [];
+    $("routeHistory").textContent = history.length
+      ? "引擎切换：" + history.map(item => {
+          const name = routeLabel(item.provider);
+          const state = item.ok === false ? "失败" : "成功";
+          const credential = item.credentialLabel ? `/${item.credentialLabel}` : "";
+          return `${name}${credential} ${state}`;
+        }).join(" → ")
+      : "引擎切换：暂无记录";
   } catch {
     $("runtimeRoute").textContent = "最近翻译路径：读取失败";
+    $("routeHistory").textContent = "引擎切换：读取失败";
   }
 }
 
@@ -363,6 +387,17 @@ function render() {
   $("clearExclusions").disabled = !currentHost;
   if ($("grantSiteAccess")) $("grantSiteAccess").disabled = !currentHost;
   if ($("retryInjection")) $("retryInjection").disabled = !currentHost;
+
+  const profile = currentSiteProfile();
+  if ($("siteProfileEnabled")) $("siteProfileEnabled").checked = Boolean(profile);
+  if ($("siteProfileSource")) $("siteProfileSource").value = profile?.sourceLang || settings.sourceLang || "auto";
+  if ($("siteProfileTarget")) $("siteProfileTarget").value = profile?.targetLang || settings.targetLang || "zh-CN";
+  if ($("siteProfileProvider")) $("siteProfileProvider").value = profile?.provider || "";
+  if ($("siteProfileDisplay")) $("siteProfileDisplay").value = profile?.displayMode || settings.displayMode || "translated";
+  if ($("siteProfileAuto")) $("siteProfileAuto").checked = profile?.autoTranslate === undefined ? settings.autoTranslate !== false : Boolean(profile.autoTranslate);
+  for (const id of ["siteProfileEnabled","siteProfileSource","siteProfileTarget","siteProfileProvider","siteProfileDisplay","siteProfileAuto","saveSiteProfile","clearSiteProfile"]) {
+    if ($(id)) $(id).disabled = !currentHost;
+  }
 }
 
 async function saveSync(patch) {
@@ -398,8 +433,11 @@ async function refreshPageState() {
   if (response.processed) pieces.push(`已翻译 ${response.processed}`);
   if (response.retried) pieces.push(`精确重试 ${response.retried}`);
   if (response.protectedRestores) pieces.push(`防覆盖恢复 ${response.protectedRestores}`);
-  if (response.failed) pieces.push(`失败文本 ${response.failed}`);
+  if (response.failed) pieces.push(`失败累计 ${response.failed}`);
+  if (response.failedQueued) pieces.push(`待手动重试 ${response.failedQueued}`);
+  if (response.siteProfile) pieces.push("网站独立配置");
   if (settings.chatMode && settings.inputPreview) pieces.push("聊天输入预览开");
+  if ($("retryFailed")) $("retryFailed").disabled = !Number(response.failedQueued || 0);
   $("pageState").textContent = pieces.join(" · ");
   $("pageState").title = response.lastError || "";
   render();
@@ -418,6 +456,82 @@ async function refreshExclusions() {
   const count = Array.isArray(response.selectors) ? response.selectors.length : 0;
   $("exclusionCount").textContent = `排除区域：${count} 条规则`;
   $("clearExclusions").disabled = count === 0;
+}
+
+async function saveCurrentSiteProfile() {
+  if (!currentHost) throw new Error("当前不是普通网页");
+  const profiles = { ...(settings.siteTranslationProfiles || {}) };
+  if (!$("siteProfileEnabled").checked) {
+    delete profiles[currentHost];
+  } else {
+    profiles[currentHost] = {
+      enabled: true,
+      sourceLang: $("siteProfileSource").value || "auto",
+      targetLang: $("siteProfileTarget").value || "zh-CN",
+      provider: $("siteProfileProvider").value || "",
+      displayMode: $("siteProfileDisplay").value || "translated",
+      autoTranslate: $("siteProfileAuto").checked,
+      skipTargetLanguage: settings.skipTargetLanguage !== false,
+      updatedAt: Date.now()
+    };
+  }
+  await saveSync({ siteTranslationProfiles: profiles });
+  $("selfCheckStatus").textContent = profiles[currentHost] ? `网站配置：已保存 ${currentHost}` : "网站配置：已恢复跟随全局";
+}
+
+async function clearCurrentSiteProfile() {
+  if (!currentHost) return;
+  const profiles = { ...(settings.siteTranslationProfiles || {}) };
+  delete profiles[currentHost];
+  await saveSync({ siteTranslationProfiles: profiles });
+  render();
+  $("selfCheckStatus").textContent = "网站配置：已清除独立配置";
+}
+
+async function runSelfCheckAndRepair() {
+  const out = $("selfCheckStatus");
+  const steps = [];
+  const say = text => { if (out) out.textContent = `自检：${text}`; };
+  say("正在检查后台…");
+
+  const ping = await chrome.runtime.sendMessage({ type: "FT_BACKGROUND_PING" }).catch(error => ({ ok: false, error: String(error?.message || error) }));
+  if (!ping?.ok) throw new Error(`后台未响应：${ping?.error || "unknown"}`);
+  steps.push("后台✓");
+
+  say("正在检查网页权限…");
+  const access = await refreshSiteAccess();
+  if (access === false && chrome.permissions?.request) {
+    await requestSiteAccess();
+    steps.push("权限已修复✓");
+  } else {
+    steps.push(access === false ? "权限未知" : "权限✓");
+  }
+
+  say("正在检查页面脚本…");
+  let page = await sendToPage({ type: "FT_GET_PAGE_STATE" });
+  if (!page?.ok) {
+    repairAttempted = false;
+    pageError = "";
+    await repairPage();
+    page = await sendToPage({ type: "FT_GET_PAGE_STATE" });
+  }
+  if (!page?.ok) throw new Error(pageError || "页面脚本仍未连接");
+  steps.push("页面脚本✓");
+
+  say("正在测试翻译引擎…");
+  const test = await chrome.runtime.sendMessage({
+    type: "FT_TRANSLATE",
+    texts: ["Hello"],
+    options: { sourceLang: "en", targetLang: "zh-CN", ...(page.provider ? { provider: page.provider } : {}) }
+  }).catch(error => ({ ok: false, error: String(error?.message || error) }));
+  if (!test?.ok || !test.translations?.[0]) throw new Error(`翻译引擎失败：${test?.error || "没有返回译文"}`);
+  steps.push("引擎✓");
+
+  say("正在确认译文链路…");
+  await sendToPage({ type: "FT_RESCAN_PAGE" });
+  steps.push("写回链路✓");
+  await Promise.allSettled([refreshPageState(), refreshRuntimeRoute(), refreshExclusions()]);
+  say(steps.join(" · "));
 }
 
 function bindControls() {
@@ -446,6 +560,20 @@ function bindControls() {
       $("pageState").textContent = `网页连接失败：${pageError}`;
     }
   });
+
+  $("runSelfCheck")?.addEventListener("click", () => {
+    $("runSelfCheck").disabled = true;
+    runSelfCheckAndRepair()
+      .catch(error => { $("selfCheckStatus").textContent = `自检失败：${error?.message || error}`; })
+      .finally(() => { $("runSelfCheck").disabled = false; });
+  });
+
+  $("saveSiteProfile")?.addEventListener("click", () => saveCurrentSiteProfile().catch(error => {
+    $("selfCheckStatus").textContent = `网站配置保存失败：${error?.message || error}`;
+  }));
+  $("clearSiteProfile")?.addEventListener("click", () => clearCurrentSiteProfile().catch(error => {
+    $("selfCheckStatus").textContent = `网站配置清除失败：${error?.message || error}`;
+  }));
 
   $("enabled").addEventListener("change", event => saveSync({ enabled: event.target.checked }));
   $("autoTranslate").addEventListener("change", event => saveSync({ autoTranslate: event.target.checked }));
@@ -504,6 +632,13 @@ function bindControls() {
     setTimeout(refreshPageState, 250);
   });
 
+  $("retryFailed")?.addEventListener("click", async () => {
+    $("pageState").textContent = "正在仅重试失败内容…";
+    const response = await sendToPage({ type: "FT_RETRY_FAILED" });
+    if (!response?.ok) $("pageState").textContent = "失败队列重试未启动";
+    setTimeout(refreshPageState, 220);
+  });
+
   $("restorePage").addEventListener("click", async () => {
     await sendToPage({ type: "FT_RESTORE_PAGE" });
     pagePaused = false;
@@ -530,6 +665,7 @@ async function init() {
   settings = { ...DEFAULTS, ...settings };
   localSettings = { ...LOCAL_DEFAULTS, ...localSettings };
   currentHost = hostFromTab(activeTab);
+  if ($("releaseChannel")) $("releaseChannel").value = localSettings.releaseChannel || "stable";
 
   const profile = await loadSiteInputProfile();
   if (profile) {
