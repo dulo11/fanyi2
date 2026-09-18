@@ -30,7 +30,7 @@
   host.id = "ft-floating-panel-host";
   // Host 覆盖整个视口，但自身不吃点击；真正的按钮/面板单独 pointer-events:auto。
   // 这样 Android Chromium/Quetta 不会出现“面板画出来了，但超出 52x52 host 后点不到”的问题。
-  host.style.cssText = "position:fixed;inset:0;z-index:2147483646;pointer-events:none;contain:style;";
+  host.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;overflow:visible;z-index:2147483646;pointer-events:none;contain:style;";
   const root = host.attachShadow({ mode: "open" });
 
   root.innerHTML = `
@@ -141,18 +141,23 @@
     if (routeBusy) return;
     routeBusy = true;
     try {
-      const r = await sendRuntime({ type: "FT_DIAGNOSTICS" }, 10000);
-      const runtime = r?.diagnostics?.lastRuntime;
-      const pool = r?.diagnostics?.providerPoolLastRoute;
+      const local = await chrome.storage.local.get({
+        translationProvider: "azure",
+        fallbackGoogle: true,
+        providerPoolLastRouteV1: null,
+        translationRuntimeStateV1: null
+      });
+      const runtime = local.translationRuntimeStateV1;
+      const pool = local.providerPoolLastRouteV1;
       const actual = pool?.provider || runtime?.actualRoute;
-      const configured = r?.diagnostics?.provider;
-      const fallback = r?.diagnostics?.fallbackGoogle !== false;
+      const configured = local.translationProvider || "azure";
+      const fallback = local.fallbackGoogle !== false;
       const visibleRoute = actual || configured || (fallback ? "google-web" : "");
       const credential = pool?.credentialLabel ? ` · ${pool.credentialLabel}` : (pool?.credentialName ? ` · ${pool.credentialName}` : "");
       const pending = !actual && visibleRoute ? " · 等待首次请求" : "";
       $("route").textContent = `翻译引擎：${routeLabel(visibleRoute)}${credential}${pending}`;
     } catch {
-      $("route").textContent = "翻译引擎：后台未响应，点此设置";
+      $("route").textContent = "翻译引擎：读取失败，点此设置";
     } finally { routeBusy = false; }
   }
 
