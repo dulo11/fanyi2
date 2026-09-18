@@ -53,11 +53,23 @@ jobs:
           assert m['background']['service_worker'] == 'background/main-zip.js'
           assert 'update_url' not in m
           js = m['content_scripts'][0]['js']
-          assert 'compat/browser-api.js' not in js
-          assert 'content/content-fast.js' in js
-          assert 'content/attribute-translator-lite.js' in js
+          assert js[:8] == [
+              'compat/browser-api.js',
+              'shared/language-core.js',
+              'content/site-exclusions.js',
+              'content/site-input-profile.js',
+              'content/content.js',
+              'content/v02-enhancements.js',
+              'content/mixed-page-guard.js',
+              'content/attribute-translator.js',
+          ]
+          assert 'content/floating-panel-simple.js' in js
+          assert 'content/content-fast.js' not in js
+          assert 'content/attribute-translator-lite.js' not in js
+          assert m['content_scripts'][0]['all_frames'] is True
+          assert m['content_scripts'][0]['match_about_blank'] is True
+          assert (root/'compat/browser-api.js').exists()
           assert not (root/'background/page-injector.js').exists()
-          assert not (root/'compat/browser-api.js').exists()
           PY
           sha256sum "dist/FloatingTranslator-Chromium-v${VERSION}.zip"
 
