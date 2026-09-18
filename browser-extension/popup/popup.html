@@ -73,6 +73,7 @@
       <label><span>当前网页规则</span><select id="pageRule"><option value="default">跟随当前网站规则</option><option value="always">始终翻译此网页</option><option value="never">此网页不翻译</option></select></label>
       <div id="host" class="host"></div>
       <div id="pageRuleHint" class="host">网页规则按当前网址路径保存，不区分 ?参数 和 #锚点。</div>
+      <div id="wildcardRuleStatus" class="host">通配规则：当前未匹配</div>
       <div id="exclusionCount" class="host">排除区域：正在读取…</div>
       <div id="runtimeRoute" class="host">最近翻译路径：正在读取…</div>
       <div id="routeHistory" class="host">引擎切换：暂无记录</div>
@@ -88,6 +89,7 @@
       </div>
       <label class="check-row"><input id="siteProfileAuto" type="checkbox"><span>此网站自动持续翻译</span></label>
       <div class="actions">
+        <button id="tempPageSkip">本次网页不翻译</button>
         <button id="saveSiteProfile">保存当前网站配置</button>
         <button id="clearSiteProfile">清除独立配置</button>
         <button id="pickExclusion">选择不翻译区域</button>
@@ -118,7 +120,7 @@
     </section>
 
     <div class="tip">暂停后保留当前译文和剩余队列；继续后接着跑。高级设置里可以导出/恢复配置和复制诊断信息。</div>
-    <button id="openOptions" class="link-button">翻译引擎、术语表、诊断与备份 ›</button>
+    <button id="openOptions" class="link-button">翻译引擎、规则管理、术语表、诊断与备份 ›</button>
   </main>
   <script src="../compat/browser-api.js"></script>
   <script src="../shared/messaging-compat.js"></script>
