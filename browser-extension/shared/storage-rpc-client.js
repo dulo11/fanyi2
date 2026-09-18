@@ -38,7 +38,13 @@
         const result = chrome.storage.local.get(query, callback);
         if (result && typeof result.then === "function") result.then(ok, fail);
       } catch (error) {
-        fail(error);
+        try {
+          const result = chrome.storage.local.get(query);
+          if (result && typeof result.then === "function") result.then(ok, fail);
+          else ok(result);
+        } catch (fallbackError) {
+          fail(fallbackError || error);
+        }
       }
     });
   }
@@ -65,7 +71,13 @@
         const result = chrome.storage.local.set(value, callback);
         if (result && typeof result.then === "function") result.then(ok, fail);
       } catch (error) {
-        fail(error);
+        try {
+          const result = chrome.storage.local.set(value);
+          if (result && typeof result.then === "function") result.then(ok, fail);
+          else ok();
+        } catch (fallbackError) {
+          fail(fallbackError || error);
+        }
       }
     });
   }
@@ -82,7 +94,13 @@
         const result = chrome.storage.local.remove(keys, done);
         if (result && typeof result.then === "function") result.then(done, done);
       } catch {
-        done();
+        try {
+          const result = chrome.storage.local.remove(keys);
+          if (result && typeof result.then === "function") result.then(done, done);
+          else done();
+        } catch {
+          done();
+        }
       }
     });
   }
