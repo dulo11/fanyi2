@@ -183,18 +183,14 @@ async function cachePrune(config = LOCAL_DEFAULTS) {
   const expiredKeys = ttlDays > 0 ? rows.filter(row => row.ts > 0 && row.ts < cutoff).map(row => row.key) : [];
   const expiredSet = new Set(expiredKeys);
   const survivors = rows.filter(row => !expiredSet.has(row.key)).sort((a, b) => a.lastAccess - b.lastAccess);
-  const deleteKeys = [...expiredKeys];
+  const excess = Math.max(0, survivors.length - maxEntries);
+  const countEvictions = survivors.slice(0, excess);
+  const remainingCandidates = survivors.slice(excess);
+  const deleteKeys = [...expiredKeys, ...countEvictions.map(row => row.key)];
   const deleteSet = new Set(deleteKeys);
 
-  while (survivors.length - (deleteKeys.length - expiredKeys.length) > maxEntries) {
-    const row = survivors.shift();
-    if (!row || deleteSet.has(row.key)) continue;
-    deleteKeys.push(row.key);
-    deleteSet.add(row.key);
-  }
-
-  let remainingBytes = rows.filter(row => !deleteSet.has(row.key)).reduce((sum, row) => sum + row.bytes, 0);
-  for (const row of survivors) {
+  let remainingBytes = remainingCandidates.reduce((sum, row) => sum + row.bytes, 0);
+  for (const row of remainingCandidates) {
     if (remainingBytes <= maxBytes) break;
     if (deleteSet.has(row.key)) continue;
     deleteKeys.push(row.key);
@@ -623,6 +619,9 @@ chrome.runtime.onInstalled.addListener(async () => {
   const currentLocal = await chrome.storage.local.get(null);
   const patch = {};
   for (const [key, value] of Object.entries(LOCAL_DEFAULTS)) if (currentLocal[key] === undefined) patch[key] = value;
+  // 旧版默认是 30000 条；如果用户从未改过这个旧默认，升级后迁移到新的 10000 条默认。
+  // 自定义过其他数值的用户保持原值。
+  if (Number(currentLocal.cacheMaxEntries) === 30000 && currentLocal.cacheMaxBytes === undefined) patch.cacheMaxEntries = 10000;
   if (currentLocal.translationProvider === "oci-proxy") patch.translationProvider = "azure";
   await chrome.storage.local.remove(["ociProxyEndpoint", "ociProxyToken"]);
   if (Object.keys(patch).length) await chrome.storage.local.set(patch);
