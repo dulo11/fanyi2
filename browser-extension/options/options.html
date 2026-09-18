@@ -20,6 +20,23 @@
       <p class="note">开启下面“多引擎 / 多 Key 池”后，真正的翻译顺序由凭据池控制；这里保留旧版设置用于兼容和迁移。</p>
     </section>
 
+    <section id="googleWebSection">
+      <h2>Google Web / Cloudflare 中转</h2>
+      <label><span>Google Web 访问方式</span>
+        <select id="googleWebMode">
+          <option value="direct">直接访问 Google（需要本地网络可用）</option>
+          <option value="proxy">只走 CF 中转（本地无需访问 Google）</option>
+          <option value="auto">优先 CF 中转，失败再尝试直连</option>
+        </select>
+      </label>
+      <label><span>CF Worker 地址</span><input id="googleWebProxyUrl" type="url" spellcheck="false" placeholder="https://fanyi-google-web-proxy.xxx.workers.dev"></label>
+      <label><span>中转 Token</span><input id="googleWebProxyToken" type="password" autocomplete="off" placeholder="留空表示不修改已保存 Token"></label>
+      <label class="check-row"><input id="clearGoogleWebProxyToken" type="checkbox"><span>清除已保存的中转 Token</span></label>
+      <div class="actions"><button id="testGoogleWebProxy" type="button">测试 CF 中转</button></div>
+      <p id="googleWebProxyStatus" class="note">中转状态：尚未测试</p>
+      <p class="note">中转 Worker 一次最多接收 40 段 / 20,000 字符，再由 Cloudflare 并发访问 Google Web。Token 只保存在本机，不会默认导出到设置备份。</p>
+    </section>
+
     <section id="providerPoolSection">
       <h2>多引擎 / 多 Key 池</h2>
       <label class="check-row"><input id="providerPoolEnabled" type="checkbox"><span>启用多引擎自动切换</span></label>
