@@ -493,6 +493,69 @@
     if (state.active && !state.paused) scheduleTreeScan(document.body);
   }
 
+  function pageStateSnapshot() {
+    return {
+      ok: true,
+      active: state.active,
+      paused: state.paused,
+      host: location.hostname,
+      pageLang: pageLanguage(),
+      queued: state.queue.size,
+      processing: state.processing,
+      processed: state.processed,
+      failed: state.failed,
+      retried: state.retried,
+      protectedRestores: state.protectedRestores,
+      lastError: state.lastError
+    };
+  }
+
+  function performDirectPageAction(action) {
+    if (action === "get-state") return;
+    if (action === "pause-toggle") {
+      setPaused(!state.paused);
+      return;
+    }
+    if (action === "translate-now") {
+      restorePage();
+      state.paused = false;
+      state.active = true;
+      scheduleTreeScan(document.body);
+      return;
+    }
+    if (action === "rescan") {
+      handleRouteRescan();
+      return;
+    }
+    if (action === "restore") {
+      state.active = false;
+      state.paused = false;
+      restorePage();
+      return;
+    }
+    throw new Error(`未知页面操作：${action}`);
+  }
+
+  // Quetta ZIP 的悬浮小窗与正文脚本处在同一个 content-script world。
+  // 直接用 DOM 事件调用本页状态，不再绕后台 -> tabs.sendMessage -> 页面这一圈。
+  window.addEventListener("ft-floating-command", event => {
+    const detail = event.detail || {};
+    let bridgeOk = true;
+    try {
+      performDirectPageAction(String(detail.action || "get-state"));
+    } catch (error) {
+      bridgeOk = false;
+      state.lastError = String(error?.message || error);
+    }
+    window.dispatchEvent(new CustomEvent("ft-floating-state", {
+      detail: {
+        ...pageStateSnapshot(),
+        requestId: detail.requestId,
+        bridgeOk
+      }
+    }));
+  }, true);
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "FT_REFRESH_SETTINGS") {
       loadSettings().then(() => sendResponse({ ok: true, active: state.active, paused: state.paused }));
@@ -528,20 +591,7 @@
       return false;
     }
     if (message?.type === "FT_GET_PAGE_STATE") {
-      sendResponse({
-        ok: true,
-        active: state.active,
-        paused: state.paused,
-        host: location.hostname,
-        pageLang: pageLanguage(),
-        queued: state.queue.size,
-        processing: state.processing,
-        processed: state.processed,
-        failed: state.failed,
-        retried: state.retried,
-        protectedRestores: state.protectedRestores,
-        lastError: state.lastError
-      });
+      sendResponse(pageStateSnapshot());
       return false;
     }
     return false;
