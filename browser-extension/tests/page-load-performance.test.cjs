@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, '..');
 const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
 
 const fast = read('content/content-fast.js');
+const storageRpc = read('shared/storage-rpc-client.js');
 const attrs = read('content/attribute-translator-lite.js');
 const guard = read('content/frame-performance-guard.js');
 const main = read('background/main.js');
@@ -18,6 +19,8 @@ assert.match(fast, /maxNodes\s*=\s*timedOut\s*\?\s*36\s*:\s*\(deadline\s*\?\s*12
 assert.match(fast, /if \(state\.paused \|\| state\.processing \|\| state\.flushTimer\) return/);
 assert.doesNotMatch(fast, /window\.addEventListener\("focus"/);
 assert.doesNotMatch(fast, /visibilitychange.*scheduleTreeScan/s);
+assert.match(fast, /FTStorageRPC/);
+assert.match(storageRpc, /__ft_rpc_request_v1__/);
 
 // 属性翻译初始化只扫一次，动态 DOM 先合并根节点再扫。
 assert.match(attrs, /loadSettings\(\{ scanNow: false \}\)/);
