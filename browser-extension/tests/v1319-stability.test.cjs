@@ -7,6 +7,11 @@ const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
 
 const contentJs = read('content/content.js');
 assert.match(contentJs, /siteTranslationProfiles/);
+assert.match(contentJs, /pageRules/);
+assert.match(contentJs, /function normalizedPageKey/);
+assert.match(contentJs, /function pageRule/);
+assert.match(contentJs, /if \(page === "never"\) return false/);
+assert.match(contentJs, /if \(page === "always"\) return true/);
 assert.match(contentJs, /failedNodes:\s*new Set\(\)/);
 assert.match(contentJs, /FT_RETRY_FAILED/);
 assert.match(contentJs, /failedQueued/);
@@ -38,7 +43,7 @@ const popupHtml = read('popup/popup.html');
 for (const id of [
   'runSelfCheck', 'selfCheckStatus', 'siteProfileEnabled', 'siteProfileProvider',
   'saveSiteProfile', 'clearSiteProfile', 'retryFailed', 'routeHistory',
-  'releaseChannel', 'openReleasePage'
+  'releaseChannel', 'openReleasePage', 'pageRule', 'pageRuleHint'
 ]) assert.match(popupHtml, new RegExp(`id=["']${id}["']`));
 
 const popup = read('popup/popup.js');
@@ -46,6 +51,8 @@ assert.match(popup, /runSelfCheckAndRepair/);
 assert.match(popup, /saveCurrentSiteProfile/);
 assert.match(popup, /FT_RETRY_FAILED/);
 assert.match(popup, /providerRouteLogV1/);
+assert.match(popup, /pageRuleKeyFromTab/);
+assert.match(popup, /pageRules/);
 
 const update = read('popup/update-controls.js');
 assert.match(update, /releaseChannel/);
