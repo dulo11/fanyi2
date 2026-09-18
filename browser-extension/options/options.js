@@ -16,7 +16,7 @@ const LOCAL_DEFAULTS = {
 };
 
 const SYNC_BACKUP_KEYS = [
-  "enabled", "autoTranslate", "sourceLang", "targetLang", "displayMode", "siteRules", "pageRules", "siteTranslationProfiles",
+  "enabled", "autoTranslate", "sourceLang", "targetLang", "displayMode", "siteRules", "pageRules", "urlPatternRules", "siteTranslationProfiles",
   "skipTargetLanguage", "chatMode", "inputPreview", "inputSourceLang", "inputTargetLang", "inputPreviewDelay"
 ];
 const LOCAL_BACKUP_KEYS = [
@@ -27,11 +27,188 @@ const LOCAL_BACKUP_KEYS = [
 const BACKUP_SCHEMA = "floating-translator-settings";
 const BACKUP_VERSION = 1;
 const $ = id => document.getElementById(id);
+let ruleRowsCache = [];
 
 function pick(source, keys) {
   const out = {};
   for (const key of keys) if (source?.[key] !== undefined) out[key] = source[key];
   return out;
+}
+
+function normalizeUrlPatternInput(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/[?#].*$/, "")
+    .replace(/^\/+/, "");
+}
+
+function managedRuleLabel(kind) {
+  if (kind === "siteRules") return "网站规则";
+  if (kind === "pageRules") return "网页规则";
+  if (kind === "urlPatternRules") return "通配规则";
+  if (kind === "siteTranslationProfiles") return "网站独立配置";
+  if (kind === "siteExclusionsV1") return "网站排除区域";
+  return kind;
+}
+
+function actionLabel(value) {
+  if (value === "always") return "始终翻译";
+  if (value === "never") return "不翻译";
+  return String(value || "");
+}
+
+function renderRuleManager() {
+  const list = $("ruleManagerList");
+  const summary = $("ruleManagerSummary");
+  if (!list || !summary) return;
+
+  const query = String($("ruleSearch")?.value || "").trim().toLowerCase();
+  const rows = ruleRowsCache.filter(row => {
+    if (!query) return true;
+    return [row.kind, row.key, row.detail, managedRuleLabel(row.kind), actionLabel(row.action)]
+      .join(" ").toLowerCase().includes(query);
+  });
+
+  list.replaceChildren();
+  summary.textContent = `规则：共 ${ruleRowsCache.length} 条${query ? ` · 当前显示 ${rows.length} 条` : ""}`;
+
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "rule-empty";
+    empty.textContent = query ? "没有匹配的规则" : "还没有保存任何翻译规则";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const row of rows) {
+    const card = document.createElement("div");
+    card.className = "rule-row";
+
+    const main = document.createElement("div");
+    main.className = "rule-main";
+    const type = document.createElement("div");
+    type.className = "rule-type";
+    type.textContent = managedRuleLabel(row.kind);
+    const key = document.createElement("div");
+    key.className = "rule-key";
+    key.textContent = row.detail ? `${row.key} · ${row.detail}` : row.key;
+    main.append(type, key);
+
+    let control;
+    if (["siteRules", "pageRules", "urlPatternRules"].includes(row.kind)) {
+      control = document.createElement("select");
+      for (const [value, label] of [["never", "不翻译"], ["always", "始终翻译"]]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        control.appendChild(option);
+      }
+      control.value = row.action;
+      control.addEventListener("change", () => updateManagedRule(row, control.value)
+        .catch(error => setStatus(`规则修改失败：${error?.message || error}`)));
+    } else {
+      control = document.createElement("div");
+      control.className = "note";
+      control.textContent = row.action || row.detail || "已保存";
+    }
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "rule-delete";
+    remove.textContent = "删除";
+    remove.addEventListener("click", () => deleteManagedRule(row)
+      .catch(error => setStatus(`规则删除失败：${error?.message || error}`)));
+
+    card.append(main, control, remove);
+    list.appendChild(card);
+  }
+}
+
+async function refreshRuleManager() {
+  const [sync, local] = await Promise.all([
+    chrome.storage.sync.get({
+      siteRules: {},
+      pageRules: {},
+      urlPatternRules: {},
+      siteTranslationProfiles: {}
+    }),
+    chrome.storage.local.get({ siteExclusionsV1: {} })
+  ]);
+
+  const rows = [];
+  for (const [key, action] of Object.entries(sync.siteRules || {})) {
+    if (["always", "never"].includes(action)) rows.push({ kind: "siteRules", key, action });
+  }
+  for (const [key, action] of Object.entries(sync.pageRules || {})) {
+    if (["always", "never"].includes(action)) rows.push({ kind: "pageRules", key, action });
+  }
+  for (const [key, action] of Object.entries(sync.urlPatternRules || {})) {
+    if (["always", "never"].includes(action)) rows.push({ kind: "urlPatternRules", key, action });
+  }
+  for (const [key, profile] of Object.entries(sync.siteTranslationProfiles || {})) {
+    if (!profile || profile.enabled === false) continue;
+    rows.push({
+      kind: "siteTranslationProfiles",
+      key,
+      action: "独立配置",
+      detail: `${profile.sourceLang || "auto"} → ${profile.targetLang || "zh-CN"}`
+    });
+  }
+  for (const [key, selectors] of Object.entries(local.siteExclusionsV1 || {})) {
+    const count = Array.isArray(selectors) ? selectors.length : 0;
+    if (count) rows.push({ kind: "siteExclusionsV1", key, action: `${count} 个排除区域`, detail: `${count} 条` });
+  }
+
+  ruleRowsCache = rows.sort((a, b) => {
+    const typeCompare = managedRuleLabel(a.kind).localeCompare(managedRuleLabel(b.kind), "zh-CN");
+    return typeCompare || a.key.localeCompare(b.key);
+  });
+  renderRuleManager();
+}
+
+async function updateManagedRule(row, action) {
+  if (!["siteRules", "pageRules", "urlPatternRules"].includes(row.kind)) return;
+  const stored = await chrome.storage.sync.get({ [row.kind]: {} });
+  const map = stored[row.kind] && typeof stored[row.kind] === "object" ? { ...stored[row.kind] } : {};
+  map[row.key] = action;
+  await chrome.storage.sync.set({ [row.kind]: map });
+  setStatus("规则已更新");
+  await refreshRuleManager();
+}
+
+async function deleteManagedRule(row) {
+  if (row.kind === "siteExclusionsV1") {
+    const stored = await chrome.storage.local.get({ siteExclusionsV1: {} });
+    const map = stored.siteExclusionsV1 && typeof stored.siteExclusionsV1 === "object" ? { ...stored.siteExclusionsV1 } : {};
+    delete map[row.key];
+    await chrome.storage.local.set({ siteExclusionsV1: map });
+  } else {
+    const stored = await chrome.storage.sync.get({ [row.kind]: {} });
+    const map = stored[row.kind] && typeof stored[row.kind] === "object" ? { ...stored[row.kind] } : {};
+    delete map[row.key];
+    await chrome.storage.sync.set({ [row.kind]: map });
+  }
+  setStatus("规则已删除");
+  await refreshRuleManager();
+}
+
+async function addUrlPatternRule() {
+  const pattern = normalizeUrlPatternInput($("urlPatternInput").value);
+  if (!pattern || /\s/.test(pattern) || pattern.length > 240) {
+    throw new Error("请输入有效网址模式，例如 github.com/*/issues/*");
+  }
+  const action = $("urlPatternAction").value === "always" ? "always" : "never";
+  const stored = await chrome.storage.sync.get({ urlPatternRules: {} });
+  const map = stored.urlPatternRules && typeof stored.urlPatternRules === "object" ? { ...stored.urlPatternRules } : {};
+  if (!Object.prototype.hasOwnProperty.call(map, pattern) && Object.keys(map).length >= 200) {
+    throw new Error("通配规则最多 200 条");
+  }
+  map[pattern] = action;
+  await chrome.storage.sync.set({ urlPatternRules: map });
+  $("urlPatternInput").value = "";
+  setStatus(`已添加通配规则：${pattern}`);
+  await refreshRuleManager();
 }
 
 function parseGlossaryText(value) {
@@ -114,7 +291,7 @@ async function load() {
   $("includeAzureKey").checked = false;
   toggleProviderSections();
   refreshGlossaryStatus();
-  await Promise.all([refreshCacheStats(), refreshDiagnostics(), refreshUsage()]);
+  await Promise.all([refreshCacheStats(), refreshDiagnostics(), refreshUsage(), refreshRuleManager()]);
 }
 
 async function save({ showStatus = true, reload = true } = {}) {
@@ -286,6 +463,15 @@ async function importSettingsFile(file) {
   setStatus(`设置恢复成功${local.azureKey !== undefined ? "（备份中包含 Key）" : "（保留当前 Key）"}`);
   await load();
 }
+
+$("ruleSearch")?.addEventListener("input", renderRuleManager);
+$("refreshRuleManager")?.addEventListener("click", () => refreshRuleManager().catch(error => setStatus(`规则读取失败：${error?.message || error}`)));
+$("addUrlPatternRule")?.addEventListener("click", () => addUrlPatternRule().catch(error => setStatus(`添加失败：${error?.message || error}`)));
+$("urlPatternInput")?.addEventListener("keydown", event => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  addUrlPatternRule().catch(error => setStatus(`添加失败：${error?.message || error}`));
+});
 
 $("provider").addEventListener("change", toggleProviderSections);
 $("glossaryText").addEventListener("input", refreshGlossaryStatus);
