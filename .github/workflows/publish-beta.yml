@@ -6,7 +6,7 @@ on:
     branches:
       - feature/v1.3.19-stability
     paths:
-      - 'browser-extension/ZIP_VERSION'
+      - 'browser-extension/**'
       - '.github/workflows/publish-beta.yml'
 
 permissions:
