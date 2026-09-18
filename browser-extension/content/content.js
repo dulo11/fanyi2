@@ -10,6 +10,7 @@
     displayMode: "translated",
     siteRules: {},
     pageRules: {},
+    urlPatternRules: {},
     siteTranslationProfiles: {},
     skipTargetLanguage: true,
     chatMode: true,
@@ -52,7 +53,8 @@
     lastError: "",
     scanTokens: new Set(),
     safetyScanTimer: null,
-    currentPageKey: ""
+    currentPageKey: "",
+    tempSkipPageKey: ""
   };
 
   const lang = () => globalThis.FTLanguage;
@@ -82,6 +84,52 @@
     catch { return "default"; }
   }
 
+  function normalizedPatternTarget() {
+    try {
+      let path = location.pathname || "/";
+      if (path.length > 1) path = path.replace(/\/+$/, "");
+      return `${location.hostname.toLowerCase()}${path}`;
+    } catch {
+      return "";
+    }
+  }
+
+  function normalizePattern(pattern) {
+    return String(pattern || "")
+      .trim()
+      .replace(/^https?:\/\//i, "")
+      .replace(/[?#].*$/, "")
+      .replace(/^\/+/, "");
+  }
+
+  function wildcardMatch(pattern, target) {
+    const normalized = normalizePattern(pattern);
+    if (!normalized || !target) return false;
+    const escaped = normalized.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    try { return new RegExp(`^${escaped}$`, "i").test(target); }
+    catch { return false; }
+  }
+
+  function patternRule() {
+    try {
+      const target = normalizedPatternTarget();
+      let best = null;
+      for (const [pattern, action] of Object.entries(state.settings.urlPatternRules || {})) {
+        if (!["always", "never"].includes(action) || !wildcardMatch(pattern, target)) continue;
+        const score = normalizePattern(pattern).replace(/\*/g, "").length;
+        if (!best || score > best.score) best = { action, pattern, score };
+      }
+      return best || { action: "default", pattern: "", score: 0 };
+    } catch {
+      return { action: "default", pattern: "", score: 0 };
+    }
+  }
+
+  function temporarySkipActive() {
+    const key = normalizedPageKey();
+    return Boolean(key && state.tempSkipPageKey === key);
+  }
+
   function siteRule() {
     try { return state.settings.siteRules?.[location.hostname] || "default"; }
     catch { return "default"; }
@@ -98,9 +146,13 @@
 
   function shouldTranslatePage() {
     if (!state.settings.enabled) return false;
+    if (temporarySkipActive()) return false;
     const currentPageRule = pageRule();
     if (currentPageRule === "never") return false;
     if (currentPageRule === "always") return true;
+    const wildcard = patternRule();
+    if (wildcard.action === "never") return false;
+    if (wildcard.action === "always") return true;
     const rule = siteRule();
     if (rule === "never") return false;
     if (rule === "always") return true;
@@ -414,6 +466,7 @@
     const stored = { ...DEFAULTS, ...(await chrome.storage.sync.get(DEFAULTS)) };
     const currentPageKey = normalizedPageKey();
     const routeChanged = Boolean(state.currentPageKey && state.currentPageKey !== currentPageKey);
+    if (state.tempSkipPageKey && state.tempSkipPageKey !== currentPageKey) state.tempSkipPageKey = "";
     const profile = siteProfileFrom(stored);
     const next = {
       ...stored,
@@ -429,6 +482,7 @@
     ].some(key => state.settings[key] !== next[key]) ||
       JSON.stringify(state.settings.siteRules) !== JSON.stringify(next.siteRules) ||
       JSON.stringify(state.settings.pageRules) !== JSON.stringify(next.pageRules) ||
+      JSON.stringify(state.settings.urlPatternRules) !== JSON.stringify(next.urlPatternRules) ||
       JSON.stringify(state.settings.siteTranslationProfiles) !== JSON.stringify(next.siteTranslationProfiles) ||
       routeChanged;
 
@@ -585,7 +639,9 @@
       provider: state.settings.provider || "",
       siteProfile: Boolean(siteProfileFrom(state.settings)),
       pageRule: pageRule(),
+      patternRule: patternRule(),
       pageKey: normalizedPageKey(),
+      temporarySkipped: temporarySkipActive(),
       visibleFirst: true
     };
   }
@@ -597,6 +653,7 @@
       return;
     }
     if (action === "translate-now") {
+      state.tempSkipPageKey = "";
       restorePage();
       state.paused = false;
       state.active = true;
@@ -646,6 +703,7 @@
       return true;
     }
     if (message?.type === "FT_TRANSLATE_NOW") {
+      state.tempSkipPageKey = "";
       restorePage();
       state.paused = false;
       state.active = true;
@@ -662,6 +720,21 @@
       setPaused(Boolean(message.paused));
       sendResponse({ ok: true, paused: state.paused, queued: state.queue.size });
       return false;
+    }
+    if (message?.type === "FT_SET_TEMP_PAGE_SKIP") {
+      if (message.enabled !== false) {
+        state.tempSkipPageKey = normalizedPageKey();
+        state.active = false;
+        state.paused = false;
+        restorePage();
+        sendResponse({ ok: true, temporarySkipped: true, pageKey: state.tempSkipPageKey });
+        return false;
+      }
+      state.tempSkipPageKey = "";
+      loadSettings({ rescan: true })
+        .then(() => sendResponse({ ok: true, temporarySkipped: false, active: state.active }))
+        .catch(error => sendResponse({ ok: false, error: String(error?.message || error) }));
+      return true;
     }
     if (message?.type === "FT_RETRY_FAILED") {
       const retriedNow = retryFailedQueue();

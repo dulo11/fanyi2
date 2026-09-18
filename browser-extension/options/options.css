@@ -134,7 +134,45 @@ textarea {
   .actions button.primary { background: #7b61ff; border-color: #7b61ff; }
   label > span, .sub, .note { color: #a8acb6; }
   .credential-card, .pool-status { background: #1d1f24; border-color: #343741; }
+  .rule-row { background: #1d1f24; border-color: #343741; }
+  .rule-delete { background: #272a31; border-color: #414550; }
 }
+
+
+
+.rule-list {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.rule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 180px) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #e3e5eb;
+  border-radius: 12px;
+  background: #fafbfe;
+}
+
+.rule-main { min-width: 0; }
+.rule-type { font-size: 12px; color: #7c808a; margin-bottom: 4px; }
+.rule-key { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.rule-row select { min-height: 38px; }
+.rule-delete {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #d8dbe3;
+  border-radius: 9px;
+  background: #f4f5f8;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.rule-empty { padding: 14px; color: #7c808a; text-align: center; }
 
 @media (max-width: 560px) {
   main { padding: 18px 12px 36px; }
@@ -143,4 +181,6 @@ textarea {
   .actions button { flex: 1 1 180px; }
   .provider-order-grid { grid-template-columns: 1fr; }
   .credential-head { align-items: flex-start; flex-direction: column; }
+  .rule-row { grid-template-columns: 1fr; }
+  .rule-delete { width: 100%; }
 }

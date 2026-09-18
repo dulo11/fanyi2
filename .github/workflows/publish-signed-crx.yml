@@ -2,35 +2,60 @@ name: Publish Signed Chromium CRX
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Publish Pure Chromium ZIP"]
+    types: [completed]
 
 permissions:
   contents: write
 
 jobs:
   publish-signed-crx:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout stable release commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Read version and verify fixed extension ID
         id: meta
         shell: bash
         run: |
           set -euo pipefail
-          VERSION=$(node -p "require('./browser-extension/manifest.json').version")
+          VERSION="$(tr -d '[:space:]' < browser-extension/ZIP_VERSION)"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           EXTENSION_ID=$(node browser-extension/tests/signed-update.test.cjs | sed -n 's/^signed update ID: //p')
           test "$EXTENSION_ID" = "hlfnagdelcpfdbpdeackdjelemaaoban"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "extension_id=$EXTENSION_ID" >> "$GITHUB_OUTPUT"
           echo "tag=browser-v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Validate extension before signing
+      - name: Validate stable core before signing
         shell: bash
         run: |
           set -euo pipefail
-          while IFS= read -r -d '' file; do node --check "$file"; done < <(find browser-extension -name '*.js' -print0)
-          node --test browser-extension/tests/*.test.cjs
+          while IFS= read -r -d '' file; do node --check "$file"; done < <(find browser-extension -type f \( -name '*.js' -o -name '*.cjs' \) -print0)
+          for test in browser-extension/tests/*.test.cjs; do node "$test"; done
+          rm -rf build/chromium-signed dist
+          mkdir -p dist
+          python browser-extension/tools/build-signed-crx-dir.py build/chromium-signed
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("build/chromium-signed")
+          m = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          version = Path("browser-extension/ZIP_VERSION").read_text().strip()
+          assert m["version"] == version
+          assert m["background"]["service_worker"] == "background/main-zip.js"
+          assert m["update_url"] == "https://raw.githubusercontent.com/dulo11/fanyi2/extension-update-channel/updates.xml"
+          js = m["content_scripts"][0]["js"]
+          assert "content/content.js" in js
+          assert "content/floating-panel-simple.js" in js
+          assert "content/content-fast.js" not in js
+          assert "shared/storage-rpc-client.js" not in js
+          PY
 
       - name: Require signing key secret
         shell: bash
@@ -39,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${FT_CRX_PRIVATE_KEY_B64:-}" ]; then
-            echo "::error::Missing repository secret FT_CRX_PRIVATE_KEY_B64. Add the same fixed CRX private key secret to dulo11/fanyi2 before publishing."
+            echo "::error::Missing repository secret FT_CRX_PRIVATE_KEY_B64."
             exit 1
           fi
           printf '%s' "$FT_CRX_PRIVATE_KEY_B64" | base64 --decode > "$RUNNER_TEMP/FloatingTranslator-private.pem"
@@ -54,34 +79,20 @@ jobs:
           if (!publicDer.equals(expected)) throw new Error('Signing key does not match the existing extension ID');
           JS
 
-      - name: Prepare clean Chromium extension directory
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf build/chromium dist
-          mkdir -p build/chromium dist
-          cp -a browser-extension/. build/chromium/
-          rm -rf build/chromium/tests build/chromium/compat/firefox
-          find build/chromium -name '*.DS_Store' -delete
-          python -m json.tool build/chromium/manifest.json >/dev/null
-
       - name: Install CRX3 packer
         shell: bash
         run: npm install --global --omit=dev crx3@2.0.0
 
-      - name: Build fixed-signature CRX3 and ZIP
+      - name: Build fixed-signature CRX3
         shell: bash
         run: |
           set -euo pipefail
-          VERSION='${{ steps.meta.outputs.version }}'
           crx3 -p "$RUNNER_TEMP/FloatingTranslator-private.pem" \
             -o dist/FloatingTranslator-Chromium.crx \
-            build/chromium
-          (cd build/chromium && zip -qr "../../dist/FloatingTranslator-Chromium-v${VERSION}.zip" .)
+            build/chromium-signed
           test -s dist/FloatingTranslator-Chromium.crx
-          test -s "dist/FloatingTranslator-Chromium-v${VERSION}.zip"
 
-      - name: Generate update manifest and checksums
+      - name: Generate update manifest and CRX checksum
         shell: bash
         run: |
           set -euo pipefail
@@ -95,9 +106,9 @@ jobs:
             </app>
           </gupdate>
           XML
-          (cd dist && sha256sum FloatingTranslator-Chromium.crx "FloatingTranslator-Chromium-v${VERSION}.zip" > SHA256SUMS.txt)
+          (cd dist && sha256sum FloatingTranslator-Chromium.crx > "SHA256SUMS-CRX-v${VERSION}.txt")
 
-      - name: Create or refresh GitHub Release assets
+      - name: Add CRX assets without replacing ZIP
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -105,23 +116,16 @@ jobs:
           set -euo pipefail
           VERSION='${{ steps.meta.outputs.version }}'
           TAG='${{ steps.meta.outputs.tag }}'
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" \
-              dist/FloatingTranslator-Chromium.crx \
-              "dist/FloatingTranslator-Chromium-v${VERSION}.zip" \
-              dist/updates.xml \
-              dist/SHA256SUMS.txt \
-              --clobber
-          else
-            gh release create "$TAG" \
-              dist/FloatingTranslator-Chromium.crx \
-              "dist/FloatingTranslator-Chromium-v${VERSION}.zip" \
-              dist/updates.xml \
-              dist/SHA256SUMS.txt \
-              --target "$GITHUB_SHA" \
-              --title "浮译 浏览器版 v${VERSION}" \
-              --notes "浮译固定签名 Chromium 更新。Extension ID: ${{ steps.meta.outputs.extension_id }}"
+          SUM="dist/SHA256SUMS-CRX-v${VERSION}.txt"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Stable ZIP release $TAG does not exist. Publish ZIP first."
+            exit 1
           fi
+          gh release upload "$TAG" \
+            dist/FloatingTranslator-Chromium.crx \
+            dist/updates.xml \
+            "$SUM" \
+            --clobber
 
       - name: Publish static update channel XML
         shell: bash
@@ -147,14 +151,13 @@ jobs:
         shell: bash
         run: rm -f "$RUNNER_TEMP/FloatingTranslator-private.pem"
 
-      - name: Upload signed build artifact
+      - name: Upload signed CRX artifact
         uses: actions/upload-artifact@v4
         with:
           name: FloatingTranslator-Signed-Chromium-v${{ steps.meta.outputs.version }}
           path: |
             dist/FloatingTranslator-Chromium.crx
-            dist/FloatingTranslator-Chromium-v${{ steps.meta.outputs.version }}.zip
             dist/updates.xml
-            dist/SHA256SUMS.txt
+            dist/SHA256SUMS-CRX-v${{ steps.meta.outputs.version }}.txt
           if-no-files-found: error
           retention-days: 30
