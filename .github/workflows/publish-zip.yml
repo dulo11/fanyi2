@@ -29,8 +29,9 @@ jobs:
           node --check browser-extension/content/content.js
           node --check browser-extension/content/attribute-translator.js
           node --check browser-extension/content/floating-panel-simple.js
-          node --check browser-extension/popup/popup-v12.js
+          node --check browser-extension/popup/popup.js
           node --check browser-extension/background/main-zip.js
+          node --check browser-extension/background/page-injector.js
           node browser-extension/tests/v12-zip-regression.test.cjs
           rm -rf build/chromium-pure-zip dist
           mkdir -p dist
@@ -54,7 +55,7 @@ jobs:
             gh release create "$TAG" "$ZIP" "$SUM" \
               --target "$GITHUB_SHA" \
               --title "浮译 浏览器版 v${VERSION}（纯 ZIP 版）" \
-              --notes "Quetta/Chromium ZIP：回到 v1.2 已验证的完整 content.js / 原生 Promise 消息架构，并使用普通 DOM 悬浮小窗；不再使用 content-fast、storage RPC 或后台页面桥。"
+              --notes "Quetta/Chromium ZIP：正文继续使用 v1.2 完整 content.js / 原生 Promise 消息；新增网页权限状态、当前页手动补注入和可见版本标记，用于解决侧载 ZIP 未注入网页脚本的问题。"
           fi
 
       - name: Upload workflow artifact
