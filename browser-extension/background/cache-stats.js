@@ -14,15 +14,32 @@ function ftOpenStatsDb() {
   });
 }
 
+function ftApproxBytes(key, value) {
+  const text = typeof value === "string" ? value : String(value?.text || "");
+  if (value && typeof value === "object" && Number(value.bytes) > 0) return Number(value.bytes);
+  try { return new TextEncoder().encode(String(key || "") + text).byteLength + 96; }
+  catch { return (String(key || "").length + text.length) * 2 + 96; }
+}
+
 async function ftCacheStats() {
   const db = await ftOpenStatsDb();
-  const entries = await new Promise((resolve, reject) => {
+  return await new Promise((resolve, reject) => {
+    const stats = { entries: 0, bytes: 0, oldestAccess: 0, newestAccess: 0 };
     const tx = db.transaction(FT_STATS_STORE, "readonly");
-    const request = tx.objectStore(FT_STATS_STORE).count();
-    request.onsuccess = () => resolve(request.result || 0);
+    const request = tx.objectStore(FT_STATS_STORE).openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return resolve(stats);
+      const value = cursor.value;
+      const at = Number(value?.lastAccess || value?.ts || 0);
+      stats.entries++;
+      stats.bytes += ftApproxBytes(cursor.key, value);
+      if (at > 0 && (!stats.oldestAccess || at < stats.oldestAccess)) stats.oldestAccess = at;
+      if (at > stats.newestAccess) stats.newestAccess = at;
+      cursor.continue();
+    };
     request.onerror = () => reject(request.error);
   });
-  return { entries };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
