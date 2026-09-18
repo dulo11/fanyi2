@@ -42,4 +42,5 @@
   safeImport("runtime-telemetry.js");
   safeImport("cache-stats.js");
   safeImport("runtime-extras.js");
+  safeImport("storage-rpc-server.js");
 })();
