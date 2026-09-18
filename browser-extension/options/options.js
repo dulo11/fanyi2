@@ -2,6 +2,9 @@ const SYNC_DEFAULTS = { enabled: true, autoTranslate: true };
 const LOCAL_DEFAULTS = {
   translationProvider: "azure",
   fallbackGoogle: true,
+  googleWebMode: "direct",
+  googleWebProxyUrl: "",
+  googleWebProxyToken: "",
   azureEndpoint: "https://api.cognitive.microsofttranslator.com",
   azureRegion: "",
   azureKey: "",
@@ -20,7 +23,7 @@ const SYNC_BACKUP_KEYS = [
   "skipTargetLanguage", "chatMode", "inputPreview", "inputSourceLang", "inputTargetLang", "inputPreviewDelay"
 ];
 const LOCAL_BACKUP_KEYS = [
-  "translationProvider", "fallbackGoogle", "azureEndpoint", "azureRegion", "requestTimeoutMs", "maxRetries",
+  "translationProvider", "fallbackGoogle", "googleWebMode", "googleWebProxyUrl", "azureEndpoint", "azureRegion", "requestTimeoutMs", "maxRetries",
   "cacheMaxEntries", "cacheMaxBytes", "cacheTtlDays", "releaseChannel", "glossaryEnabled", "glossaryCaseSensitive", "glossaryEntries",
   "siteExclusionsV1", "siteInputLanguagesV1"
 ];
@@ -275,6 +278,10 @@ async function load() {
 
   $("provider").value = local.translationProvider || "azure";
   $("fallbackGoogle").checked = local.fallbackGoogle !== false;
+  $("googleWebMode").value = ["direct", "proxy", "auto"].includes(local.googleWebMode) ? local.googleWebMode : "direct";
+  $("googleWebProxyUrl").value = local.googleWebProxyUrl || "";
+  $("googleWebProxyToken").placeholder = local.googleWebProxyToken ? "已保存（留空表示不修改）" : "请输入 FT_PROXY_TOKEN";
+  $("clearGoogleWebProxyToken").checked = false;
   $("azureEndpoint").value = local.azureEndpoint || LOCAL_DEFAULTS.azureEndpoint;
   $("azureRegion").value = local.azureRegion || "";
   $("azureKey").placeholder = local.azureKey ? "已保存（留空表示不修改）" : "请输入 Azure Translator Key";
@@ -300,6 +307,8 @@ async function save({ showStatus = true, reload = true } = {}) {
   const local = {
     translationProvider: $("provider").value,
     fallbackGoogle: $("fallbackGoogle").checked,
+    googleWebMode: $("googleWebMode").value,
+    googleWebProxyUrl: $("googleWebProxyUrl").value.trim().replace(/\/+$/, ""),
     azureEndpoint: $("azureEndpoint").value.trim() || LOCAL_DEFAULTS.azureEndpoint,
     azureRegion: $("azureRegion").value.trim(),
     requestTimeoutMs: Math.max(3000, Math.min(45000, Number($("requestTimeoutMs").value) || 15000)),
@@ -313,14 +322,56 @@ async function save({ showStatus = true, reload = true } = {}) {
   };
   if ($("clearAzureKey").checked) local.azureKey = "";
   else if ($("azureKey").value.trim()) local.azureKey = $("azureKey").value.trim();
+  if ($("clearGoogleWebProxyToken").checked) local.googleWebProxyToken = "";
+  else if ($("googleWebProxyToken").value.trim()) local.googleWebProxyToken = $("googleWebProxyToken").value.trim();
 
   await Promise.all([
     chrome.storage.sync.set(sync), chrome.storage.local.set(local), chrome.storage.local.remove(["ociProxyEndpoint", "ociProxyToken"])
   ]);
   $("azureKey").value = "";
   $("clearAzureKey").checked = false;
+  $("googleWebProxyToken").value = "";
+  $("clearGoogleWebProxyToken").checked = false;
   if (showStatus) setStatus(`已保存${parsedGlossary.invalid.length ? `；${parsedGlossary.invalid.length} 行格式错误未保存` : ""}`);
   if (reload) await load();
+}
+
+async function testGoogleWebProxy() {
+  const status = $("googleWebProxyStatus");
+  status.textContent = "中转状态：正在保存并测试…";
+  await save({ showStatus: false, reload: false });
+  const local = await chrome.storage.local.get({
+    googleWebProxyUrl: "",
+    googleWebProxyToken: ""
+  });
+  const base = String(local.googleWebProxyUrl || "").trim().replace(/\/+$/, "");
+  if (!base) throw new Error("请先填写 CF Worker 地址");
+  const endpoint = base.endsWith("/translate") ? base : `${base}/translate`;
+  const headers = { "Content-Type": "application/json" };
+  if (local.googleWebProxyToken) headers["X-FT-Token"] = local.googleWebProxyToken;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        texts: ["Hello, this is a proxy test."],
+        sourceLang: "en",
+        targetLang: "zh-CN"
+      }),
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`);
+  }
+  const result = payload.translations?.[0] || "";
+  status.textContent = `中转状态：成功 · ${payload.durationMs || 0}ms · ${result}`;
 }
 
 async function testEngine() {
@@ -476,6 +527,7 @@ $("urlPatternInput")?.addEventListener("keydown", event => {
 $("provider").addEventListener("change", toggleProviderSections);
 $("glossaryText").addEventListener("input", refreshGlossaryStatus);
 $("save").addEventListener("click", () => save().catch(error => setStatus(`保存失败：${error?.message || error}`)));
+$("testGoogleWebProxy")?.addEventListener("click", () => testGoogleWebProxy().catch(error => { $("googleWebProxyStatus").textContent = `中转状态：失败 · ${error?.message || error}`; }));
 $("testEngine").addEventListener("click", () => testEngine().catch(error => setStatus(`测试失败：${error?.message || error}`)));
 $("refreshUsage").addEventListener("click", () => refreshUsage().catch(error => setStatus(`用量读取失败：${error?.message || error}`)));
 $("resetUsage").addEventListener("click", () => resetUsage().catch(error => setStatus(`重置失败：${error?.message || error}`)));
