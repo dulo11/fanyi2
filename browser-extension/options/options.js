@@ -340,38 +340,33 @@ async function testGoogleWebProxy() {
   const status = $("googleWebProxyStatus");
   status.textContent = "中转状态：正在保存并测试…";
   await save({ showStatus: false, reload: false });
+
   const local = await chrome.storage.local.get({
     googleWebProxyUrl: "",
     googleWebProxyToken: ""
   });
-  const base = String(local.googleWebProxyUrl || "").trim().replace(/\/+$/, "");
-  if (!base) throw new Error("请先填写 CF Worker 地址");
-  const endpoint = base.endsWith("/translate") ? base : `${base}/translate`;
-  const headers = { "Content-Type": "application/json" };
-  if (local.googleWebProxyToken) headers["X-FT-Token"] = local.googleWebProxyToken;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
-  let response;
-  try {
-    response = await fetch(endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        texts: ["Hello, this is a proxy test."],
-        sourceLang: "en",
-        targetLang: "zh-CN"
-      }),
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timer);
+  if (!String(local.googleWebProxyUrl || "").trim()) throw new Error("请先填写 CF Worker 地址");
+  if (local.googleWebProxyToken) {
+    $("googleWebProxyToken").placeholder = "已保存（留空表示不修改）";
   }
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.ok) {
-    throw new Error(payload?.error || `HTTP ${response.status}`);
-  }
-  const result = payload.translations?.[0] || "";
-  status.textContent = `中转状态：成功 · ${payload.durationMs || 0}ms · ${result}`;
+
+  // 通过后台翻译链测试，而不是从 options 页直接跨域 fetch。
+  // Android Chromium/Quetta 某些版本会让 chrome-extension:// 设置页 fetch 返回 Failed to fetch，
+  // 但后台 service worker 具备扩展 host_permissions，实际翻译也正是从后台发出。
+  const startedAt = performance.now();
+  const response = await chrome.runtime.sendMessage({
+    type: "FT_TRANSLATE",
+    texts: ["Hello, this is a proxy test."],
+    options: {
+      provider: "google-web",
+      sourceLang: "en",
+      targetLang: "zh-CN"
+    }
+  });
+  if (!response?.ok) throw new Error(response?.error || "后台中转测试失败");
+
+  const result = response.translations?.[0] || "";
+  status.textContent = `中转状态：成功 · ${Math.round(performance.now() - startedAt)}ms · ${result}`;
 }
 
 async function testEngine() {
