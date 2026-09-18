@@ -261,7 +261,8 @@ async function sendToPage(message) {
     return response;
   } catch (error) {
     const serviceWorker = chrome.runtime.getManifest?.()?.background?.service_worker || "";
-    if (serviceWorker !== "background/main.js") {
+    const canRepairPage = serviceWorker === "background/main.js" || serviceWorker === "background/main-zip.js";
+    if (!canRepairPage) {
       const type = String(message?.type || "");
       if (type === "FT_GET_PAGE_STATE") {
         pageError = "等待网页脚本状态，请刷新当前网页一次";
@@ -519,6 +520,8 @@ function bindControls() {
 async function init() {
   bindControls();
   populateLanguages();
+  const manifest = chrome.runtime.getManifest?.();
+  if ($("popupVersion")) $("popupVersion").textContent = `v${manifest?.version || "?"} · v1.2核心`;
   [settings, localSettings, activeTab] = await Promise.all([
     chrome.storage.sync.get(DEFAULTS),
     chrome.storage.local.get(LOCAL_DEFAULTS),
