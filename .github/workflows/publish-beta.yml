@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/v1.3.19-stability
+      - feature/v1.3.21-cf-google-proxy
     paths:
       - 'browser-extension/**'
       - '.github/workflows/publish-beta.yml'
