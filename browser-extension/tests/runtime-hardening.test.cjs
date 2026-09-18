@@ -11,8 +11,9 @@ assert.equal(manifest.name, '浮译');
 assert.equal(manifest.background.service_worker, 'background/main.js');
 
 const scripts = manifest.content_scripts?.[0]?.js || [];
-assert.deepEqual(scripts.slice(0, 9), [
+assert.deepEqual(scripts.slice(0, 10), [
   'shared/messaging-compat.js',
+  'shared/storage-rpc-client.js',
   'compat/browser-api.js',
   'shared/language-core.js',
   'content/site-exclusions.js',
@@ -43,6 +44,11 @@ assert.match(backgroundMain, /glossary-runtime\.js/);
 assert.match(backgroundMain, /runtime-telemetry\.js/);
 assert.match(backgroundMain, /cache-stats\.js/);
 assert.match(backgroundMain, /runtime-extras\.js/);
+assert.match(backgroundMain, /storage-rpc-server\.js/);
+
+const storageRpc = read("shared/storage-rpc-client.js");
+assert.match(storageRpc, /FTStorageRPC/);
+assert.match(storageRpc, /FTPageBridge/);
 
 const providerPool = read('background/provider-pool.js');
 assert.match(providerPool, /providerPoolEnabled/);
