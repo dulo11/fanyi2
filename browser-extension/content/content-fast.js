@@ -51,15 +51,17 @@
     protectedRestores: 0,
     lastError: "",
     lastCommandId: "",
+    pageBridgeTimer: null,
+    pageHeartbeatTimer: null,
     scanTokens: new Set()
   };
 
   const lang = () => globalThis.FTLanguage;
   const exclusions = () => globalThis.FTSiteExclusions;
 
-  function sendRuntime(message, timeoutMs = 60000) {
+  function sendRuntime(message, timeoutMs = 15000) {
     if (/^FT_TRANSLATE/.test(String(message?.type || "")) && globalThis.FTStorageRPC?.send) {
-      return globalThis.FTStorageRPC.send(message, timeoutMs);
+      return globalThis.FTStorageRPC.send(message, Math.min(15000, Number(timeoutMs || 15000)));
     }
     if (globalThis.FTMessaging?.runtimeSend) return globalThis.FTMessaging.runtimeSend(message, timeoutMs);
     return chrome.runtime.sendMessage(message);
@@ -667,6 +669,35 @@
     return false;
   });
 
+  function consumePageCommand(command) {
+    if (!command?.id || String(command.id) === state.lastCommandId) return false;
+    try {
+      performPageAction(String(command.action || "get-state"), command.payload || {});
+      state.lastError = "";
+    } catch (error) {
+      state.lastError = String(error?.message || error);
+    }
+    state.lastCommandId = String(command.id);
+    publishPageStateSoon(0);
+    return true;
+  }
+
+  async function pollPageBridge() {
+    clearTimeout(state.pageBridgeTimer);
+    if (!globalThis.FTPageBridge?.readPageCommand || !location.hostname) return;
+    try {
+      const command = await globalThis.FTPageBridge.readPageCommand(location.hostname);
+      consumePageCommand(command);
+    } catch {}
+    state.pageBridgeTimer = setTimeout(pollPageBridge, 180);
+  }
+
+  function startPageHeartbeat() {
+    clearInterval(state.pageHeartbeatTimer);
+    publishPageStateSoon(0);
+    state.pageHeartbeatTimer = setInterval(() => publishPageStateSoon(0), 900);
+  }
+
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "sync" && Object.keys(changes).some(key => key in DEFAULTS)) {
       loadSettings().then(() => publishPageStateSoon(0)).catch(() => {});
@@ -674,17 +705,7 @@
     }
     if (area !== "local" || !globalThis.FTPageBridge?.pageCommandKey) return;
     const commandKey = globalThis.FTPageBridge.pageCommandKey(location.hostname);
-    const command = changes[commandKey]?.newValue;
-    if (!command?.id) return;
-    try {
-      performPageAction(String(command.action || "get-state"), command.payload || {});
-      state.lastCommandId = String(command.id);
-      publishPageStateSoon(0);
-    } catch (error) {
-      state.lastError = String(error?.message || error);
-      state.lastCommandId = String(command.id);
-      publishPageStateSoon(0);
-    }
+    consumePageCommand(changes[commandKey]?.newValue);
   });
   document.addEventListener("keydown", translateFocusedInput, true);
   window.addEventListener("ft-route-change", handleRouteRescan, true);
@@ -713,7 +734,8 @@
     await waitForPageLoadBudget();
     startObserver();
     if (state.active && !state.paused) queueScanRoot(document.body);
-    publishPageStateSoon(0);
+    startPageHeartbeat();
+    void pollPageBridge();
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
