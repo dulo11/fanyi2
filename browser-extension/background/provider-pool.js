@@ -23,6 +23,7 @@
     cacheTtlDays: 30
   };
   const ROUTE_KEY = "providerPoolLastRouteV1";
+  const ROUTE_LOG_KEY = "providerRouteLogV1";
   const health = new Map();
 
   const PROVIDER_LABELS = {
@@ -232,7 +233,7 @@
 
   async function cacheWrite(provider, sourceLang, targetLang, text, translated) {
     if (typeof globalThis.cacheSet !== "function" || typeof globalThis.cacheKey !== "function") return;
-    await globalThis.cacheSet(globalThis.cacheKey(provider, sourceLang, targetLang, text), translated);
+    await globalThis.cacheSet(globalThis.cacheKey(provider, sourceLang, targetLang, text), translated, text);
   }
 
   async function translateAzure(texts, options, credential, config) {
@@ -437,16 +438,22 @@
 
   async function writeRoute(provider, credential, ok, error = "") {
     try {
+      const now = Date.now();
+      const entry = {
+        provider,
+        label: PROVIDER_LABELS[provider] || provider,
+        credentialId: credential?.id || "",
+        credentialLabel: credential?.label || "",
+        ok,
+        error: String(error || ""),
+        at: now
+      };
+      const stored = await chrome.storage.local.get({ [ROUTE_LOG_KEY]: [] });
+      const log = Array.isArray(stored[ROUTE_LOG_KEY]) ? stored[ROUTE_LOG_KEY].slice(-19) : [];
+      log.push(entry);
       await chrome.storage.local.set({
-        [ROUTE_KEY]: {
-          provider,
-          label: PROVIDER_LABELS[provider] || provider,
-          credentialId: credential?.id || "",
-          credentialLabel: credential?.label || "",
-          ok,
-          error: String(error || ""),
-          at: Date.now()
-        }
+        [ROUTE_KEY]: entry,
+        [ROUTE_LOG_KEY]: log
       });
     } catch {}
   }

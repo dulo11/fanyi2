@@ -16,7 +16,8 @@ const LOCAL_DEFAULTS = {
   azureKey: "",
   requestTimeoutMs: 15000,
   maxRetries: 3,
-  cacheMaxEntries: 30000,
+  cacheMaxEntries: 10000,
+  cacheMaxBytes: 52428800,
   cacheTtlDays: 30
 };
 
@@ -50,6 +51,37 @@ function cacheRecordText(record) {
   return null;
 }
 
+function cacheApproxBytes(key, text) {
+  try {
+    return new TextEncoder().encode(String(key || "") + String(text || "")).byteLength + 96;
+  } catch {
+    return (String(key || "").length + String(text || "").length) * 2 + 96;
+  }
+}
+
+function shouldCacheTranslation(text) {
+  const value = String(text || "").trim();
+  if (value.length < 3 || value.length > 6000) return false;
+  if (/^[\d\s\p{P}\p{S}_]+$/u.test(value)) return false;
+  if (/^(?:\d{1,2}[:：]\d{2}|\d{4}[-/.]\d{1,2}[-/.]\d{1,2})(?:\s|$)/.test(value)) return false;
+  return true;
+}
+
+async function cacheTouch(key, record) {
+  if (!record || typeof record !== "object") return;
+  const now = Date.now();
+  if (now - Number(record.lastAccess || record.ts || 0) < 60000) return;
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put({ ...record, lastAccess: now }, key);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
 async function cacheDelete(key) {
   try {
     const db = await openDb();
@@ -81,18 +113,27 @@ async function cacheGet(key, config = LOCAL_DEFAULTS) {
         return null;
       }
     }
+    void cacheTouch(key, record);
     return text;
   } catch {
     return null;
   }
 }
 
-async function cacheSet(key, value) {
+async function cacheSet(key, value, originalText = "") {
+  const text = String(value ?? "");
+  if (!shouldCacheTranslation(originalText || text)) return;
   try {
     const db = await openDb();
+    const now = Date.now();
     await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put({ text: String(value ?? ""), ts: Date.now() }, key);
+      tx.objectStore(STORE).put({
+        text,
+        ts: now,
+        lastAccess: now,
+        bytes: cacheApproxBytes(key, text)
+      }, key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -114,7 +155,8 @@ async function cacheClear() {
 }
 
 async function cachePrune(config = LOCAL_DEFAULTS) {
-  const maxEntries = Math.max(1000, Math.min(200000, Number(config.cacheMaxEntries ?? 30000)));
+  const maxEntries = Math.max(1000, Math.min(200000, Number(config.cacheMaxEntries ?? 10000)));
+  const maxBytes = Math.max(5 * 1024 * 1024, Math.min(500 * 1024 * 1024, Number(config.cacheMaxBytes ?? 52428800)));
   const ttlDays = Math.max(0, Math.min(3650, Number(config.cacheTtlDays ?? 30)));
   const cutoff = ttlDays > 0 ? Date.now() - ttlDays * 86400000 : 0;
   const db = await openDb();
@@ -127,7 +169,12 @@ async function cachePrune(config = LOCAL_DEFAULTS) {
       if (!cursor) return resolve(items);
       const value = cursor.value;
       const ts = value && typeof value === "object" ? Number(value.ts) || 0 : 0;
-      items.push({ key: cursor.key, ts });
+      const lastAccess = value && typeof value === "object" ? Number(value.lastAccess || value.ts) || 0 : ts;
+      const text = cacheRecordText(value) || "";
+      const bytes = value && typeof value === "object" && Number(value.bytes) > 0
+        ? Number(value.bytes)
+        : cacheApproxBytes(cursor.key, text);
+      items.push({ key: cursor.key, ts, lastAccess, bytes });
       cursor.continue();
     };
     request.onerror = () => reject(request.error);
@@ -135,9 +182,21 @@ async function cachePrune(config = LOCAL_DEFAULTS) {
 
   const expiredKeys = ttlDays > 0 ? rows.filter(row => row.ts > 0 && row.ts < cutoff).map(row => row.key) : [];
   const expiredSet = new Set(expiredKeys);
-  const survivors = rows.filter(row => !expiredSet.has(row.key)).sort((a, b) => a.ts - b.ts);
+  const survivors = rows.filter(row => !expiredSet.has(row.key)).sort((a, b) => a.lastAccess - b.lastAccess);
   const excess = Math.max(0, survivors.length - maxEntries);
-  const deleteKeys = [...expiredKeys, ...survivors.slice(0, excess).map(row => row.key)];
+  const countEvictions = survivors.slice(0, excess);
+  const remainingCandidates = survivors.slice(excess);
+  const deleteKeys = [...expiredKeys, ...countEvictions.map(row => row.key)];
+  const deleteSet = new Set(deleteKeys);
+
+  let remainingBytes = remainingCandidates.reduce((sum, row) => sum + row.bytes, 0);
+  for (const row of remainingCandidates) {
+    if (remainingBytes <= maxBytes) break;
+    if (deleteSet.has(row.key)) continue;
+    deleteKeys.push(row.key);
+    deleteSet.add(row.key);
+    remainingBytes -= row.bytes;
+  }
 
   if (deleteKeys.length) {
     await new Promise((resolve, reject) => {
@@ -150,7 +209,16 @@ async function cachePrune(config = LOCAL_DEFAULTS) {
   }
 
   lastCachePruneAt = Date.now();
-  return { before: rows.length, deleted: deleteKeys.length, remaining: Math.max(0, rows.length - deleteKeys.length) };
+  const remainingRows = rows.filter(row => !deleteSet.has(row.key));
+  return {
+    before: rows.length,
+    deleted: deleteKeys.length,
+    remaining: remainingRows.length,
+    bytesBefore: rows.reduce((sum, row) => sum + row.bytes, 0),
+    bytesRemaining: remainingRows.reduce((sum, row) => sum + row.bytes, 0),
+    maxBytes,
+    maxEntries
+  };
 }
 
 async function maybePruneCache(config) {
@@ -421,7 +489,7 @@ async function translateGoogleBatch(texts, sourceLang, targetLang, config) {
       let translated = await cacheGet(key, config);
       if (typeof translated !== "string") {
         translated = await googleWebTranslate(item.text, sourceLang, targetLang, config);
-        await cacheSet(key, translated);
+        await cacheSet(key, translated, item.text);
       } else {
         cacheHits++;
       }
@@ -485,7 +553,7 @@ async function translateAzureBatch(texts, sourceLang, targetLang, config) {
       const item = misses[i];
       const translated = pieceResults[i].join("");
       item.indexes.forEach(index => { results[index] = translated; });
-      await cacheSet(item.key, translated);
+      await cacheSet(item.key, translated, item.text);
     }
     return results;
   } catch (error) {
@@ -551,6 +619,9 @@ chrome.runtime.onInstalled.addListener(async () => {
   const currentLocal = await chrome.storage.local.get(null);
   const patch = {};
   for (const [key, value] of Object.entries(LOCAL_DEFAULTS)) if (currentLocal[key] === undefined) patch[key] = value;
+  // 旧版默认是 30000 条；如果用户从未改过这个旧默认，升级后迁移到新的 10000 条默认。
+  // 自定义过其他数值的用户保持原值。
+  if (Number(currentLocal.cacheMaxEntries) === 30000 && currentLocal.cacheMaxBytes === undefined) patch.cacheMaxEntries = 10000;
   if (currentLocal.translationProvider === "oci-proxy") patch.translationProvider = "azure";
   await chrome.storage.local.remove(["ociProxyEndpoint", "ociProxyToken"]);
   if (Object.keys(patch).length) await chrome.storage.local.set(patch);

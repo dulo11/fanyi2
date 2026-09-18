@@ -9,6 +9,8 @@
     targetLang: "zh-CN",
     displayMode: "translated",
     siteRules: {},
+    pageRules: {},
+    siteTranslationProfiles: {},
     skipTargetLanguage: true,
     chatMode: true,
     inputPreview: true,
@@ -38,6 +40,7 @@
     retryTimer: null,
     nodeState: new WeakMap(),
     nodeRetries: new WeakMap(),
+    failedNodes: new Set(),
     trackedNodes: new Set(),
     generation: 0,
     observer: null,
@@ -48,7 +51,8 @@
     protectedRestores: 0,
     lastError: "",
     scanTokens: new Set(),
-    safetyScanTimer: null
+    safetyScanTimer: null,
+    currentPageKey: ""
   };
 
   const lang = () => globalThis.FTLanguage;
@@ -63,13 +67,40 @@
     return lang()?.normalizeLang(document.documentElement?.lang || document.body?.getAttribute("lang") || "") || "";
   }
 
+  function normalizedPageKey() {
+    try {
+      let path = location.pathname || "/";
+      if (path.length > 1) path = path.replace(/\/+$/, "");
+      return `${location.origin}${path}`;
+    } catch {
+      return "";
+    }
+  }
+
+  function pageRule() {
+    try { return state.settings.pageRules?.[normalizedPageKey()] || "default"; }
+    catch { return "default"; }
+  }
+
   function siteRule() {
     try { return state.settings.siteRules?.[location.hostname] || "default"; }
     catch { return "default"; }
   }
 
+  function siteProfileFrom(settings) {
+    try {
+      const profile = settings?.siteTranslationProfiles?.[location.hostname];
+      return profile && profile.enabled !== false ? profile : null;
+    } catch {
+      return null;
+    }
+  }
+
   function shouldTranslatePage() {
     if (!state.settings.enabled) return false;
+    const currentPageRule = pageRule();
+    if (currentPageRule === "never") return false;
+    if (currentPageRule === "always") return true;
     const rule = siteRule();
     if (rule === "never") return false;
     if (rule === "always") return true;
@@ -154,6 +185,7 @@
 
   function enqueueNode(node) {
     if (!state.active || state.paused || !isEligibleTextNode(node)) return;
+    state.failedNodes.delete(node);
     const previous = state.nodeState.get(node);
     if (previous) {
       const current = node.nodeValue;
@@ -241,6 +273,8 @@
         state.queue.add(entry.node);
         state.retried++;
         maxRetry = Math.max(maxRetry, retries);
+      } else {
+        state.failedNodes.add(entry.node);
       }
     }
     if (!state.queue.size || state.paused) return;
@@ -249,6 +283,27 @@
       state.retryTimer = null;
       scheduleFlush(0);
     }, Math.min(8000, 650 * (2 ** Math.max(0, maxRetry - 1))));
+  }
+
+  function retryFailedQueue() {
+    let count = 0;
+    for (const node of [...state.failedNodes]) {
+      if (!node?.isConnected || !isEligibleTextNode(node)) {
+        state.failedNodes.delete(node);
+        continue;
+      }
+      state.nodeRetries.delete(node);
+      state.queue.add(node);
+      state.failedNodes.delete(node);
+      count++;
+    }
+    if (count) {
+      state.active = true;
+      state.paused = false;
+      state.lastError = "";
+      scheduleFlush(0);
+    }
+    return count;
   }
 
   async function processQueue() {
@@ -269,7 +324,11 @@
       const response = await chrome.runtime.sendMessage({
         type: "FT_TRANSLATE_DETAILED",
         texts: entries.map(entry => entry.parts.core),
-        options: { sourceLang: state.settings.sourceLang, targetLang: state.settings.targetLang }
+        options: {
+          sourceLang: state.settings.sourceLang,
+          targetLang: state.settings.targetLang,
+          ...(state.settings.provider ? { provider: state.settings.provider } : {})
+        }
       });
 
       if (generation !== state.generation || !state.active) return;
@@ -287,6 +346,7 @@
         if (typeof translated === "string" && entry.node.isConnected && !isExcludedElement(entry.node.parentElement)) {
           applyTranslation(entry.node, entry.parts, entry.originalFull, translated);
           state.nodeRetries.delete(entry.node);
+          state.failedNodes.delete(entry.node);
           state.processed++;
           return;
         }
@@ -334,6 +394,7 @@
     clearTimeout(state.retryTimer);
     state.retryTimer = null;
     state.queue.clear();
+    state.failedNodes.clear();
     for (const node of [...state.trackedNodes]) {
       const record = state.nodeState.get(node);
       if (!record) continue;
@@ -350,13 +411,30 @@
   }
 
   async function loadSettings({ rescan = true } = {}) {
-    const next = { ...DEFAULTS, ...(await chrome.storage.sync.get(DEFAULTS)) };
+    const stored = { ...DEFAULTS, ...(await chrome.storage.sync.get(DEFAULTS)) };
+    const currentPageKey = normalizedPageKey();
+    const routeChanged = Boolean(state.currentPageKey && state.currentPageKey !== currentPageKey);
+    const profile = siteProfileFrom(stored);
+    const next = {
+      ...stored,
+      provider: String(profile?.provider || ""),
+      sourceLang: String(profile?.sourceLang || stored.sourceLang || "auto"),
+      targetLang: String(profile?.targetLang || stored.targetLang || "zh-CN"),
+      displayMode: String(profile?.displayMode || stored.displayMode || "translated"),
+      autoTranslate: profile?.autoTranslate === undefined ? stored.autoTranslate : Boolean(profile.autoTranslate),
+      skipTargetLanguage: profile?.skipTargetLanguage === undefined ? stored.skipTargetLanguage : Boolean(profile.skipTargetLanguage)
+    };
     const materiallyChanged = [
-      "sourceLang", "targetLang", "displayMode", "enabled", "autoTranslate", "skipTargetLanguage"
-    ].some(key => state.settings[key] !== next[key]) || JSON.stringify(state.settings.siteRules) !== JSON.stringify(next.siteRules);
+      "sourceLang", "targetLang", "displayMode", "enabled", "autoTranslate", "skipTargetLanguage", "provider"
+    ].some(key => state.settings[key] !== next[key]) ||
+      JSON.stringify(state.settings.siteRules) !== JSON.stringify(next.siteRules) ||
+      JSON.stringify(state.settings.pageRules) !== JSON.stringify(next.pageRules) ||
+      JSON.stringify(state.settings.siteTranslationProfiles) !== JSON.stringify(next.siteTranslationProfiles) ||
+      routeChanged;
 
     if (materiallyChanged) restorePage();
     state.settings = next;
+    state.currentPageKey = currentPageKey;
     state.active = shouldTranslatePage();
     if (rescan && state.active && !state.paused) scheduleTreeScan(document.body);
   }
@@ -432,7 +510,8 @@
         texts: [text],
         options: {
           sourceLang: state.settings.chatMode ? state.settings.inputSourceLang : state.settings.sourceLang,
-          targetLang: state.settings.chatMode ? state.settings.inputTargetLang : state.settings.targetLang
+          targetLang: state.settings.chatMode ? state.settings.inputTargetLang : state.settings.targetLang,
+          ...(state.settings.provider ? { provider: state.settings.provider } : {})
         }
       });
       if (!response?.ok) throw new Error(response?.error || "翻译失败");
@@ -453,14 +532,9 @@
   }
 
   function handleRouteRescan() {
-    if (!state.active || state.paused) return;
-    state.generation++;
-    cancelScans();
-    clearTimeout(state.flushTimer);
-    clearTimeout(state.retryTimer);
-    state.retryTimer = null;
-    state.queue.clear();
-    setTimeout(() => scheduleTreeScan(document.body), 100);
+    loadSettings({ rescan: true }).catch(error => {
+      state.lastError = String(error?.message || error);
+    });
   }
 
   function scheduleSafetyScan(delay = 250) {
@@ -504,9 +578,15 @@
       processing: state.processing,
       processed: state.processed,
       failed: state.failed,
+      failedQueued: state.failedNodes.size,
       retried: state.retried,
       protectedRestores: state.protectedRestores,
-      lastError: state.lastError
+      lastError: state.lastError,
+      provider: state.settings.provider || "",
+      siteProfile: Boolean(siteProfileFrom(state.settings)),
+      pageRule: pageRule(),
+      pageKey: normalizedPageKey(),
+      visibleFirst: true
     };
   }
 
@@ -525,6 +605,10 @@
     }
     if (action === "rescan") {
       handleRouteRescan();
+      return;
+    }
+    if (action === "retry-failed") {
+      retryFailedQueue();
       return;
     }
     if (action === "restore") {
@@ -577,6 +661,11 @@
     if (message?.type === "FT_SET_PAUSED") {
       setPaused(Boolean(message.paused));
       sendResponse({ ok: true, paused: state.paused, queued: state.queue.size });
+      return false;
+    }
+    if (message?.type === "FT_RETRY_FAILED") {
+      const retriedNow = retryFailedQueue();
+      sendResponse({ ok: true, retriedNow, failedQueued: state.failedNodes.size, queued: state.queue.size });
       return false;
     }
     if (message?.type === "FT_RESTORE_PAGE") {
