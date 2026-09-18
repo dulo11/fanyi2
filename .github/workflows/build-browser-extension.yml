@@ -76,6 +76,9 @@ jobs:
           assert 'popupVersion' in html
           assert 'background/main-zip.js' in popup
           assert 'FT_REPAIR_CURRENT_PAGE' in popup
+          assert 'updateCard' in html
+          assert 'releaseChannel' in html
+          assert 'update-controls.js' in html
           PY
           sha256sum "dist/FloatingTranslator-Chromium-v${VERSION}.zip"
 
