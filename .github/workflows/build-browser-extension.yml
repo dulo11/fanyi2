@@ -69,7 +69,13 @@ jobs:
           assert m['content_scripts'][0]['all_frames'] is True
           assert m['content_scripts'][0]['match_about_blank'] is True
           assert (root/'compat/browser-api.js').exists()
-          assert not (root/'background/page-injector.js').exists()
+          assert (root/'background/page-injector.js').exists()
+          html = (root/'popup/popup.html').read_text(encoding='utf-8')
+          popup = (root/'popup/popup.js').read_text(encoding='utf-8')
+          assert 'siteAccessCard' in html
+          assert 'popupVersion' in html
+          assert 'background/main-zip.js' in popup
+          assert 'FT_REPAIR_CURRENT_PAGE' in popup
           PY
           sha256sum "dist/FloatingTranslator-Chromium-v${VERSION}.zip"
 
