@@ -26,10 +26,12 @@ jobs:
           VERSION="$(tr -d '[:space:]' < browser-extension/ZIP_VERSION)"
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          node --check browser-extension/content/content-fast.js
-          node --check browser-extension/content/attribute-translator-lite.js
+          node --check browser-extension/content/content.js
+          node --check browser-extension/content/attribute-translator.js
+          node --check browser-extension/content/floating-panel-simple.js
+          node --check browser-extension/popup/popup-v12.js
           node --check browser-extension/background/main-zip.js
-          node browser-extension/tests/page-load-performance.test.cjs
+          node browser-extension/tests/v12-zip-regression.test.cjs
           rm -rf build/chromium-pure-zip dist
           mkdir -p dist
           python browser-extension/tools/build-pure-zip.py build/chromium-pure-zip
@@ -52,7 +54,7 @@ jobs:
             gh release create "$TAG" "$ZIP" "$SUM" \
               --target "$GITHUB_SHA" \
               --title "浮译 浏览器版 v${VERSION}（纯 ZIP 版）" \
-              --notes "Quetta/Chromium ZIP 主线：只使用 manifest 原生 content scripts；不包含 CRX 补注入器、动态脚本注册或 CRX callback 兼容层。"
+              --notes "Quetta/Chromium ZIP：回到 v1.2 已验证的完整 content.js / 原生 Promise 消息架构，并使用普通 DOM 悬浮小窗；不再使用 content-fast、storage RPC 或后台页面桥。"
           fi
 
       - name: Upload workflow artifact
