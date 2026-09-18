@@ -9,6 +9,7 @@
     targetLang: "zh-CN",
     displayMode: "translated",
     siteRules: {},
+    pageRules: {},
     siteTranslationProfiles: {},
     skipTargetLanguage: true,
     chatMode: true,
@@ -50,7 +51,8 @@
     protectedRestores: 0,
     lastError: "",
     scanTokens: new Set(),
-    safetyScanTimer: null
+    safetyScanTimer: null,
+    currentPageKey: ""
   };
 
   const lang = () => globalThis.FTLanguage;
@@ -63,6 +65,21 @@
 
   function pageLanguage() {
     return lang()?.normalizeLang(document.documentElement?.lang || document.body?.getAttribute("lang") || "") || "";
+  }
+
+  function normalizedPageKey() {
+    try {
+      let path = location.pathname || "/";
+      if (path.length > 1) path = path.replace(/\/+$/, "");
+      return `${location.origin}${path}`;
+    } catch {
+      return "";
+    }
+  }
+
+  function pageRule() {
+    try { return state.settings.pageRules?.[normalizedPageKey()] || "default"; }
+    catch { return "default"; }
   }
 
   function siteRule() {
@@ -81,6 +98,9 @@
 
   function shouldTranslatePage() {
     if (!state.settings.enabled) return false;
+    const page = pageRule();
+    if (page === "never") return false;
+    if (page === "always") return true;
     const rule = siteRule();
     if (rule === "never") return false;
     if (rule === "always") return true;
@@ -392,6 +412,8 @@
 
   async function loadSettings({ rescan = true } = {}) {
     const stored = { ...DEFAULTS, ...(await chrome.storage.sync.get(DEFAULTS)) };
+    const currentPageKey = normalizedPageKey();
+    const routeChanged = Boolean(state.currentPageKey && state.currentPageKey !== currentPageKey);
     const profile = siteProfileFrom(stored);
     const next = {
       ...stored,
@@ -406,10 +428,13 @@
       "sourceLang", "targetLang", "displayMode", "enabled", "autoTranslate", "skipTargetLanguage", "provider"
     ].some(key => state.settings[key] !== next[key]) ||
       JSON.stringify(state.settings.siteRules) !== JSON.stringify(next.siteRules) ||
-      JSON.stringify(state.settings.siteTranslationProfiles) !== JSON.stringify(next.siteTranslationProfiles);
+      JSON.stringify(state.settings.pageRules) !== JSON.stringify(next.pageRules) ||
+      JSON.stringify(state.settings.siteTranslationProfiles) !== JSON.stringify(next.siteTranslationProfiles) ||
+      routeChanged;
 
     if (materiallyChanged) restorePage();
     state.settings = next;
+    state.currentPageKey = currentPageKey;
     state.active = shouldTranslatePage();
     if (rescan && state.active && !state.paused) scheduleTreeScan(document.body);
   }
@@ -507,14 +532,9 @@
   }
 
   function handleRouteRescan() {
-    if (!state.active || state.paused) return;
-    state.generation++;
-    cancelScans();
-    clearTimeout(state.flushTimer);
-    clearTimeout(state.retryTimer);
-    state.retryTimer = null;
-    state.queue.clear();
-    setTimeout(() => scheduleTreeScan(document.body), 100);
+    loadSettings({ rescan: true }).catch(error => {
+      state.lastError = String(error?.message || error);
+    });
   }
 
   function scheduleSafetyScan(delay = 250) {
@@ -564,6 +584,8 @@
       lastError: state.lastError,
       provider: state.settings.provider || "",
       siteProfile: Boolean(siteProfileFrom(state.settings)),
+      pageRule: pageRule(),
+      pageKey: normalizedPageKey(),
       visibleFirst: true
     };
   }
