@@ -11,6 +11,9 @@ const SYNC_DEFAULTS = {
 const LOCAL_DEFAULTS = {
   translationProvider: "azure",
   fallbackGoogle: true,
+  googleWebMode: "direct",
+  googleWebProxyUrl: "",
+  googleWebProxyToken: "",
   azureEndpoint: "https://api.cognitive.microsofttranslator.com",
   azureRegion: "",
   azureKey: "",
@@ -404,6 +407,127 @@ async function googleWebTranslate(text, sourceLang, targetLang, config) {
   return translated.join("");
 }
 
+function googleProxyEndpoint(config) {
+  const raw = String(config.googleWebProxyUrl || "").trim().replace(/\/+$/, "");
+  if (!raw) return "";
+  return raw.endsWith("/translate") ? raw : `${raw}/translate`;
+}
+
+function normalizedGoogleWebMode(config) {
+  const mode = String(config.googleWebMode || "direct").toLowerCase();
+  return ["direct", "proxy", "auto"].includes(mode) ? mode : "direct";
+}
+
+async function googleWebProxyTranslateBatch(texts, sourceLang, targetLang, config) {
+  const endpoint = googleProxyEndpoint(config);
+  if (!endpoint) throw new Error("尚未设置 Google Web CF 中转地址");
+  const headers = { "Content-Type": "application/json" };
+  const token = String(config.googleWebProxyToken || "");
+  if (token) headers["X-FT-Token"] = token;
+
+  const response = await fetchWithRetry(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      texts,
+      sourceLang: sourceLang || "auto",
+      targetLang
+    })
+  }, { ...config, maxRetries: Math.min(1, Number(config.maxRetries ?? 1)) }, "Google Web CF 中转");
+
+  let payload = null;
+  try { payload = await response.json(); }
+  catch {}
+
+  if (!response.ok || !payload?.ok) {
+    const detail = payload?.error ? ` · ${payload.error}` : "";
+    throw new Error(`Google Web CF 中转失败：HTTP ${response.status}${detail}`);
+  }
+  if (!Array.isArray(payload.translations) || payload.translations.length !== texts.length) {
+    throw new Error("Google Web CF 中转返回条数不匹配");
+  }
+
+  await recordUsage("google-web", texts);
+  try {
+    await chrome.storage.local.set({
+      googleWebLastRouteV1: {
+        route: "cf-proxy",
+        ok: true,
+        at: Date.now(),
+        itemCount: texts.length,
+        chars: texts.reduce((sum, text) => sum + String(text || "").length, 0),
+        durationMs: Number(payload.durationMs || 0)
+      }
+    });
+  } catch {}
+  return payload.translations.map((value, index) => typeof value === "string" ? value : texts[index]);
+}
+
+function makeGoogleProxyBatches(items) {
+  const batches = [];
+  let current = [];
+  let chars = 0;
+  for (const item of items) {
+    const size = item.text.length;
+    if (current.length && (current.length >= 40 || chars + size > 20000)) {
+      batches.push(current);
+      current = [];
+      chars = 0;
+    }
+    current.push(item);
+    chars += size;
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+async function translateGoogleMissesViaProxy(misses, sourceLang, targetLang, config) {
+  const expanded = [];
+  misses.forEach((item, missIndex) => {
+    splitLongText(item.text, 3400).forEach((piece, pieceIndex) => {
+      expanded.push({ missIndex, pieceIndex, text: piece });
+    });
+  });
+
+  const pieceResults = Array.from({ length: misses.length }, () => []);
+  for (const batch of makeGoogleProxyBatches(expanded)) {
+    const translated = await googleWebProxyTranslateBatch(
+      batch.map(item => item.text),
+      sourceLang,
+      targetLang,
+      config
+    );
+    batch.forEach((item, index) => {
+      pieceResults[item.missIndex][item.pieceIndex] = translated[index];
+    });
+  }
+  return misses.map((item, index) => pieceResults[index].join("") || item.text);
+}
+
+async function translateGoogleMissesDirect(misses, sourceLang, targetLang, config) {
+  const results = new Array(misses.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < misses.length) {
+      const index = cursor++;
+      results[index] = await googleWebTranslate(misses[index].text, sourceLang, targetLang, config);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, misses.length || 1) }, worker));
+  try {
+    await chrome.storage.local.set({
+      googleWebLastRouteV1: {
+        route: "direct",
+        ok: true,
+        at: Date.now(),
+        itemCount: misses.length,
+        chars: misses.reduce((sum, item) => sum + String(item.text || "").length, 0)
+      }
+    });
+  } catch {}
+  return results;
+}
+
 function azureHeaders(config) {
   if (!config.azureKey) throw new Error("尚未设置 Microsoft/Azure Translator Key");
   const headers = {
@@ -475,30 +599,57 @@ function groupUniqueTexts(texts) {
 async function translateGoogleBatch(texts, sourceLang, targetLang, config) {
   const results = new Array(texts.length);
   const unique = groupUniqueTexts(texts);
-  let cursor = 0;
+  const misses = [];
   let cacheHits = 0;
 
-  async function worker() {
-    while (cursor < unique.length) {
-      const item = unique[cursor++];
-      if (!item.text.trim()) {
-        item.indexes.forEach(index => { results[index] = item.text; });
-        continue;
-      }
-      const key = cacheKey("google-web", sourceLang, targetLang, item.text);
-      let translated = await cacheGet(key, config);
-      if (typeof translated !== "string") {
-        translated = await googleWebTranslate(item.text, sourceLang, targetLang, config);
-        await cacheSet(key, translated, item.text);
-      } else {
-        cacheHits++;
-      }
-      item.indexes.forEach(index => { results[index] = translated; });
+  for (const item of unique) {
+    if (!item.text.trim()) {
+      item.indexes.forEach(index => { results[index] = item.text; });
+      continue;
+    }
+    const key = cacheKey("google-web", sourceLang, targetLang, item.text);
+    const cached = await cacheGet(key, config);
+    if (typeof cached === "string") {
+      cacheHits++;
+      item.indexes.forEach(index => { results[index] = cached; });
+    } else {
+      misses.push({ ...item, key });
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(4, unique.length || 1) }, worker));
   await recordCacheHits(cacheHits);
+  if (!misses.length) return results;
+
+  const mode = normalizedGoogleWebMode(config);
+  let translated;
+  if (mode === "direct") {
+    translated = await translateGoogleMissesDirect(misses, sourceLang, targetLang, config);
+  } else {
+    try {
+      translated = await translateGoogleMissesViaProxy(misses, sourceLang, targetLang, config);
+    } catch (error) {
+      try {
+        await chrome.storage.local.set({
+          googleWebLastRouteV1: {
+            route: "cf-proxy",
+            ok: false,
+            at: Date.now(),
+            error: String(error?.message || error)
+          }
+        });
+      } catch {}
+      if (mode !== "auto") throw error;
+      console.warn("[FloatingTranslator] Google Web CF 中转失败，改为直连", error);
+      translated = await translateGoogleMissesDirect(misses, sourceLang, targetLang, config);
+    }
+  }
+
+  for (let i = 0; i < misses.length; i++) {
+    const item = misses[i];
+    const value = translated[i] ?? item.text;
+    item.indexes.forEach(index => { results[index] = value; });
+    await cacheSet(item.key, value, item.text);
+  }
   return results;
 }
 
