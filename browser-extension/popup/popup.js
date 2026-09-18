@@ -5,6 +5,7 @@ const DEFAULTS = {
   targetLang: "zh-CN",
   displayMode: "translated",
   siteRules: {},
+  pageRules: {},
   siteTranslationProfiles: {},
   skipTargetLanguage: true,
   chatMode: true,
@@ -71,6 +72,18 @@ function hostFromTab(tab) {
     const url = new URL(tab?.url || "");
     return ["http:", "https:"].includes(url.protocol) ? url.hostname.toLowerCase() : "";
   } catch { return ""; }
+}
+
+function pageRuleKeyFromTab(tab) {
+  try {
+    const url = new URL(tab?.url || "");
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    let path = url.pathname || "/";
+    if (path.length > 1) path = path.replace(/\/+$/, "");
+    return `${url.origin}${path}`;
+  } catch {
+    return "";
+  }
 }
 
 function currentOriginPattern() {
@@ -379,7 +392,13 @@ function render() {
   $("inputTargetLang").value = settings.inputTargetLang || "en";
   $("siteRule").value = currentHost ? (settings.siteRules?.[currentHost] || "default") : "default";
   $("siteRule").disabled = !currentHost;
+  const pageKey = pageRuleKeyFromTab(activeTab);
+  $("pageRule").value = pageKey ? (settings.pageRules?.[pageKey] || "default") : "default";
+  $("pageRule").disabled = !pageKey;
   $("host").textContent = currentHost || "此页面不支持扩展脚本";
+  if ($("pageRuleHint")) $("pageRuleHint").textContent = pageKey
+    ? `当前网页：${pageKey.replace(/^https?:\/\//, "")}`
+    : "当前网页规则：此页面不支持";
   $("pauseResume").textContent = pagePaused ? "继续翻译" : "暂停翻译";
   $("swapInputLang").disabled = (settings.inputSourceLang || "auto") === "auto";
   $("swapInputLang").title = $("swapInputLang").disabled ? "先把输入语言改成具体语言后才能交换" : "交换输入与发送语言";
@@ -600,6 +619,15 @@ function bindControls() {
     if (event.target.value === "default") delete siteRules[currentHost];
     else siteRules[currentHost] = event.target.value;
     await saveSync({ siteRules });
+  });
+
+  $("pageRule").addEventListener("change", async event => {
+    const key = pageRuleKeyFromTab(activeTab);
+    if (!key) return;
+    const pageRules = { ...(settings.pageRules || {}) };
+    if (event.target.value === "default") delete pageRules[key];
+    else pageRules[key] = event.target.value;
+    await saveSync({ pageRules });
   });
 
   $("pickExclusion").addEventListener("click", async () => {
