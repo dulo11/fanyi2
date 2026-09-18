@@ -30,17 +30,20 @@ function context() {
 (async () => {
   const t = context();
   vm.runInNewContext(read('content/floating-panel.js'), t.ctx);
-  const root = t.document.documentElement.children[0].shadowRoot;
-  const fab = root.getElementById('fab'), panel = root.getElementById('panel');
-  await fab.emit('click'); assert.equal(panel.style.display, 'block');
-  await root.getElementById('close').emit('click'); assert.equal(panel.style.display, 'none');
-  await fab.emit('click'); assert.equal(panel.style.display, 'block');
+  const fabHost = t.document.documentElement.children[0];
+  const panelHost = t.document.documentElement.children[1];
+  const fabRoot = fabHost.shadowRoot;
+  const root = panelHost.shadowRoot;
+  const fab = fabRoot.getElementById('fab');
+  await fab.emit('click'); assert.equal(panelHost.style.display, 'block');
+  await root.getElementById('close').emit('click'); assert.equal(panelHost.style.display, 'none');
+  await fab.emit('click'); assert.equal(panelHost.style.display, 'block');
   await root.getElementById('route').emit('click'); assert.equal(t.opened(), 1);
-  assert.equal(panel.style.display, 'none');
+  assert.equal(panelHost.style.display, 'none');
   // Old touch-only browser emits a compatibility click after touchend.
   await fab.emit('touchstart', { touches: [{ clientX: 20, clientY: 20 }] });
   await fab.emit('touchend', { changedTouches: [{ clientX: 20, clientY: 20 }] });
-  await fab.emit('click'); assert.equal(panel.style.display, 'block');
+  await fab.emit('click'); assert.equal(panelHost.style.display, 'block');
   const p = context();
   p.chrome.storage.sync.get = () => new Promise(() => {});
   vm.runInNewContext(read('popup/popup.js'), p.ctx);
