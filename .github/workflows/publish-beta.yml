@@ -2,6 +2,12 @@ name: Publish Chromium ZIP Beta
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/v1.3.19-stability
+    paths:
+      - 'browser-extension/ZIP_VERSION'
+      - '.github/workflows/publish-beta.yml'
 
 permissions:
   contents: write
