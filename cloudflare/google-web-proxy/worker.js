@@ -8,7 +8,10 @@
 const MAX_ITEMS = 40;
 const MAX_TOTAL_CHARS = 20000;
 const MAX_ITEM_CHARS = 3400;
-const GOOGLE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
+const GOOGLE_ENDPOINTS = [
+  "https://translate.google.com/translate_a/single",
+  "https://translate.googleapis.com/translate_a/single"
+];
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -41,28 +44,53 @@ async function translateOne(text, sourceLang, targetLang) {
     q: text
   });
 
-  const response = await fetch(`${GOOGLE_ENDPOINT}?${params.toString()}`, {
-    headers: {
-      "accept": "application/json,text/plain,*/*",
-      "user-agent": "Mozilla/5.0 FloatingTranslator-CF/1.0"
-    },
-    cf: { cacheTtl: 0, cacheEverything: false }
-  });
+  let lastError = null;
+  for (const endpoint of GOOGLE_ENDPOINTS) {
+    let response;
+    try {
+      response = await fetch(`${endpoint}?${params.toString()}`, {
+        headers: {
+          "accept": "application/json,text/plain,*/*",
+          "accept-language": "en-US,en;q=0.9",
+          "referer": "https://translate.google.com/",
+          "user-agent": "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36"
+        },
+        cf: { cacheTtl: 0, cacheEverything: false }
+      });
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
 
-  if (!response.ok) {
-    const retryAfter = response.headers.get("retry-after") || "";
-    const body = await response.text().catch(() => "");
-    const error = new Error(`Google Web HTTP ${response.status}${body ? ` · ${body.slice(0, 160)}` : ""}`);
-    error.status = response.status;
-    error.retryAfter = retryAfter;
-    throw error;
+    if (!response.ok) {
+      const retryAfter = response.headers.get("retry-after") || "";
+      const body = await response.text().catch(() => "");
+      const error = new Error(
+        response.status === 429
+          ? "Google 对当前 Cloudflare 出口限流（HTTP 429）"
+          : `Google Web HTTP ${response.status}${body ? ` · ${body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 120)}` : ""}`
+      );
+      error.status = response.status;
+      error.retryAfter = retryAfter;
+      error.endpoint = endpoint;
+      lastError = error;
+      if ([403, 429, 500, 502, 503, 504].includes(response.status)) continue;
+      throw error;
+    }
+
+    try {
+      const data = await response.json();
+      const translated = Array.isArray(data?.[0])
+        ? data[0].map(segment => segment?.[0] || "").join("")
+        : "";
+      if (translated) return translated;
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
   }
 
-  const data = await response.json();
-  const translated = Array.isArray(data?.[0])
-    ? data[0].map(segment => segment?.[0] || "").join("")
-    : "";
-  return translated || text;
+  throw lastError || new Error("Google Web 所有上游端点均不可用");
 }
 
 async function mapLimit(items, limit, mapper) {
@@ -118,7 +146,7 @@ export default {
 
     const startedAt = Date.now();
     try {
-      const translations = await mapLimit(texts, 6, text =>
+      const translations = await mapLimit(texts, 2, text =>
         text.trim() ? translateOne(text, sourceLang, targetLang) : Promise.resolve(text)
       );
       return json({
