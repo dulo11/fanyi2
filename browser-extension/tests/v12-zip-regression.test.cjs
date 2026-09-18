@@ -14,10 +14,12 @@ assert.match(builder, /block\["match_about_blank"\] = True/);
 assert.doesNotMatch(builder, /item = "content\/content-fast\.js"/);
 assert.doesNotMatch(builder, /item = "content\/attribute-translator-lite\.js"/);
 
-const popup = read('popup/popup-v12.js');
+const popup = read('popup/popup.js');
 assert.match(popup, /chrome\.tabs\.sendMessage/);
 assert.match(popup, /chrome\.runtime\.sendMessage/);
-assert.doesNotMatch(popup, /FTPageBridge|FTStorageRPC|storage-rpc/);
+assert.match(popup, /background\/main-zip\.js/);
+assert.match(popup, /FT_REPAIR_CURRENT_PAGE/);
+assert.match(popup, /v1\.2核心/);
 
 const compat = read('compat/browser-api-v12.js');
 assert.match(compat, /__FT_BROWSER_FAMILY__/);
@@ -28,10 +30,15 @@ assert.match(content, /chrome\.runtime\.sendMessage\(\{\s*type:\s*"FT_TRANSLATE_
 assert.match(content, /ft-floating-command/);
 assert.match(content, /performDirectPageAction/);
 
+const injector = read('background/page-injector.js');
+assert.match(injector, /FT_REPAIR_CURRENT_PAGE/);
+assert.match(injector, /executeScript/);
+assert.match(injector, /manual-native-sequential/);
+
 const panel = read('content/floating-panel-simple.js');
 assert.match(panel, /document\.createElement\("button"\)/);
 assert.match(panel, /document\.createElement\("div"\)/);
 assert.doesNotMatch(panel, /attachShadow|shadowRoot/);
 assert.doesNotMatch(panel, /position:\s*fixed[^\n]*inset:\s*0/i);
 
-console.log('v1.2-core ZIP regression checks passed');
+console.log('v1.2-core ZIP + Quetta repair regression checks passed');
