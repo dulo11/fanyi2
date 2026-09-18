@@ -70,7 +70,9 @@
 
     <section class="card">
       <label><span>当前网站规则</span><select id="siteRule"><option value="default">跟随全局设置</option><option value="always">始终翻译此网站</option><option value="never">永不翻译此网站</option></select></label>
+      <label><span>当前网页规则</span><select id="pageRule"><option value="default">跟随当前网站规则</option><option value="always">始终翻译此网页</option><option value="never">此网页不翻译</option></select></label>
       <div id="host" class="host"></div>
+      <div id="pageRuleHint" class="host">网页规则按当前网址路径保存，不区分 ?参数 和 #锚点。</div>
       <div id="exclusionCount" class="host">排除区域：正在读取…</div>
       <div id="runtimeRoute" class="host">最近翻译路径：正在读取…</div>
       <div id="routeHistory" class="host">引擎切换：暂无记录</div>
