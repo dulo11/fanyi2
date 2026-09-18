@@ -1,7 +1,11 @@
-name = "fanyi-google-web-proxy"
+name = "fanyi2"
 main = "worker.js"
 compatibility_date = "2026-09-01"
 
+# Cloudflare Git 集成：
+# - 如果根目录设为 cloudflare/google-web-proxy，部署命令用 npx wrangler deploy
+# - 如果根目录保持仓库根目录，部署命令用：
+#   npx wrangler deploy --config cloudflare/google-web-proxy/wrangler.toml
+#
 # 不要把真实 Token 写进这个文件。
-# 部署后执行：
-# wrangler secret put FT_PROXY_TOKEN
+# 在 Cloudflare Variables and Secrets 中保存 FT_PROXY_TOKEN 为 Secret。
