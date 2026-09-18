@@ -37,6 +37,11 @@
   safeImport("../shared/crypto-lite.js");
   safeImport("../shared/glossary-core.js");
   safeImport("service-worker.js", true);
+
+  // Quetta 侧载 ZIP 有时不会把 manifest content_scripts 注入到已经打开或未授予站点访问的网页。
+  // Popup 首次连接失败时通过这个手动注入器恢复 v1.2 核心脚本。
+  safeImport("page-injector.js");
+
   safeImport("provider-pool.js");
   safeImport("glossary-runtime.js");
   safeImport("runtime-telemetry.js");
