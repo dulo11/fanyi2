@@ -116,7 +116,8 @@ const popup = read('popup/popup.js');
 assert.match(popup, /siteInputLanguagesV1/);
 assert.match(popup, /saveSiteInputProfile/);
 assert.match(popup, /runtimeRoute/);
-assert.match(popup, /FT_DIAGNOSTICS/);
+assert.match(popup, /translationRuntimeStateV1/);
+assert.match(popup, /FTPageBridge/);
 assert.match(popup, /FT_PICK_EXCLUSION/);
 assert.match(read('popup/popup.html'), /\.\.\/compat\/browser-api\.js/);
 
