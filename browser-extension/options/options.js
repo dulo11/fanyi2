@@ -16,7 +16,7 @@ const LOCAL_DEFAULTS = {
 };
 
 const SYNC_BACKUP_KEYS = [
-  "enabled", "autoTranslate", "sourceLang", "targetLang", "displayMode", "siteRules",
+  "enabled", "autoTranslate", "sourceLang", "targetLang", "displayMode", "siteRules", "siteTranslationProfiles",
   "skipTargetLanguage", "chatMode", "inputPreview", "inputSourceLang", "inputTargetLang", "inputPreviewDelay"
 ];
 const LOCAL_BACKUP_KEYS = [
