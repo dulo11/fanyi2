@@ -43,4 +43,17 @@ assert.match(worker, /translate\.googleapis\.com\/translate_a\/single/);
 assert.match(worker, /mapLimit\(texts, 6/);
 assert.doesNotMatch(worker, /fetch\(payload\?\.url|fetch\(body\?\.url/, 'worker must not be an open arbitrary URL proxy');
 
+
+const panel = read('content/floating-panel-simple.js');
+assert.match(panel, /POSITION_KEY = "floatingPanelPositionV1"/);
+assert.match(panel, /DRAG_THRESHOLD = 9/);
+assert.match(panel, /pointerdown/);
+assert.match(panel, /pointermove/);
+assert.match(panel, /pointerup/);
+assert.match(panel, /setPointerCapture/);
+assert.match(panel, /chrome\.storage\.local\.set/);
+assert.match(panel, /restoreFabPosition/);
+assert.match(panel, /suppressClick/);
+assert.doesNotMatch(panel, /dblclick|double|longpress|long-press/i);
+
 console.log('v1.3.21 CF Google Web proxy contract passed');
