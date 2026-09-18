@@ -98,9 +98,9 @@
 
   function shouldTranslatePage() {
     if (!state.settings.enabled) return false;
-    const page = pageRule();
-    if (page === "never") return false;
-    if (page === "always") return true;
+    const currentPageRule = pageRule();
+    if (currentPageRule === "never") return false;
+    if (currentPageRule === "always") return true;
     const rule = siteRule();
     if (rule === "never") return false;
     if (rule === "always") return true;
