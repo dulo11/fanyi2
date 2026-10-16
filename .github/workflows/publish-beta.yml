@@ -62,4 +62,4 @@ jobs:
             dist/FloatingTranslator-Chromium-v${{ steps.meta.outputs.version }}-beta-${{ steps.meta.outputs.build }}.zip
             dist/SHA256SUMS-v${{ steps.meta.outputs.version }}-beta-${{ steps.meta.outputs.build }}.txt
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
