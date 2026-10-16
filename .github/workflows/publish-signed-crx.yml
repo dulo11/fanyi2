@@ -160,4 +160,4 @@ jobs:
             dist/updates.xml
             dist/SHA256SUMS-CRX-v${{ steps.meta.outputs.version }}.txt
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 3
