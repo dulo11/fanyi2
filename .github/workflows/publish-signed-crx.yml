@@ -151,13 +151,3 @@ jobs:
         shell: bash
         run: rm -f "$RUNNER_TEMP/FloatingTranslator-private.pem"
 
-      - name: Upload signed CRX artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: FloatingTranslator-Signed-Chromium-v${{ steps.meta.outputs.version }}
-          path: |
-            dist/FloatingTranslator-Chromium.crx
-            dist/updates.xml
-            dist/SHA256SUMS-CRX-v${{ steps.meta.outputs.version }}.txt
-          if-no-files-found: error
-          retention-days: 3
