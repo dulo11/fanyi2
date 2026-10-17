@@ -3,10 +3,8 @@ name: Publish Pure Chromium ZIP
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - 'browser-extension/ZIP_VERSION'
-      - '.github/workflows/publish-zip.yml'
+    tags:
+      - 'browser-v*'
 
 permissions:
   contents: write
@@ -40,6 +38,17 @@ jobs:
           (cd build/chromium-pure-zip && zip -qr "../../dist/FloatingTranslator-Chromium-v${VERSION}.zip" .)
           sha256sum "dist/FloatingTranslator-Chromium-v${VERSION}.zip" > "dist/SHA256SUMS-v${VERSION}.txt"
 
+      - name: Validate official version/tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < browser-extension/ZIP_VERSION)"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            test "$GITHUB_REF_NAME" = "browser-v$VERSION" || { echo "::error::Tag must be browser-v$VERSION"; exit 1; }
+          else
+            test "$GITHUB_REF" = 'refs/heads/main' || { echo "::error::Manual publication only from main"; exit 1; }
+          fi
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,20 +60,11 @@ jobs:
           ZIP="dist/FloatingTranslator-Chromium-v${VERSION}.zip"
           SUM="dist/SHA256SUMS-v${VERSION}.txt"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$ZIP" "$SUM" --clobber
-          else
-            gh release create "$TAG" "$ZIP" "$SUM" \
-              --target "$GITHUB_SHA" \
-              --title "浮译 浏览器版 v${VERSION}（纯 ZIP 版）" \
-              --notes "Quetta/Chromium 稳定增强版：保留 v1.2 正文主链和普通 DOM 悬浮窗；新增一键自检修复、网站独立配置、失败队列、引擎切换记录、LRU 容量缓存和 Stable/Beta 更新通道。"
+            echo "::error::Version $TAG already published. Increase ZIP_VERSION before publishing."
+            exit 1
           fi
+          gh release create "$TAG" "$ZIP" "$SUM" \
+            --target "$GITHUB_SHA" \
+            --title "浮译 浏览器版 v${VERSION}（纯 ZIP 版）" \
+            --notes "Quetta/Chromium 稳定增强版：保留 v1.2 正文主链和普通 DOM 悬浮窗；新增一键自检修复、网站独立配置、失败队列、引擎切换记录、LRU 容量缓存和 Stable/Beta 更新通道。"
 
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: FloatingTranslator-Chromium-v${{ steps.meta.outputs.version }}
-          path: |
-            dist/FloatingTranslator-Chromium-v${{ steps.meta.outputs.version }}.zip
-            dist/SHA256SUMS-v${{ steps.meta.outputs.version }}.txt
-          if-no-files-found: error
-          retention-days: 3
